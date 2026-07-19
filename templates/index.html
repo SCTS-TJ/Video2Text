@@ -266,11 +266,11 @@ function renderResult(d, url){
     const iframe = document.getElementById("ytFrame");
     iframe.onload = () => { try{ ytPlayer = iframe.contentWindow; }catch(e){} };
   } else if(d.file_url && d.has_media !== false){
-    const isAudio = d.mode === "audio";
-    const tag = isAudio ? "audio" : "video";
+    const isVideo = d.media_type === "video";
+    const tag = isVideo ? "video" : "video";
     stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
     mediaEl = document.getElementById("mediaPlayer");
-    $("left-meta").textContent = isAudio ? "\ud83c\udfb5 音频" : "\ud83c\udfac 视频";
+    $("left-meta").textContent = isVideo ? "\U0001f3ac 视频预览" : "\U0001f3b5 预览";
   } else if(d.channel === "transcript"){
     stage.innerHTML = '<div class="placeholder"><div class="big">\ud83d\udcdd</div>字幕直取，无需媒体</div>';
     $("left-meta").textContent = "字幕模式";

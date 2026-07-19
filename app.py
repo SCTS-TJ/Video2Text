@@ -106,18 +106,25 @@ def _build_payload(result: dict, url: str) -> dict:
     embed = _youtube_embed(url)
     payload["embed_url"] = embed
 
-    # 只要有 path, 就生成 file_url (不限 channel)
-    if result.get("path"):
+    # 只要有 video_path, 优先用视频预览
+    if result.get("video_path"):
+        name = os.path.basename(result["video_path"])
+        payload["file_url"] = f"/files/{name}"
+    elif result.get("path"):
         name = os.path.basename(result["path"])
         payload["file_url"] = f"/files/{name}"
     else:
         payload["file_url"] = ""
 
-    # 如果是字幕通道(无音频文件), 标记无预览
-    if result.get("channel") == "transcript":
-        payload["has_media"] = False
+    # 判断是否有可预览的媒体文件
+    payload["has_media"] = bool(result.get("video_path") or result.get("path"))
+    # 标记是视频还是音频
+    if result.get("video_path"):
+        payload["media_type"] = "video"
+    elif result.get("mode") == "audio":
+        payload["media_type"] = "audio"
     else:
-        payload["has_media"] = bool(result.get("path"))
+        payload["media_type"] = ""
 
     return payload
 
@@ -135,16 +142,37 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                     tasks[task_id]["status"] = "error"
                     tasks[task_id]["error"] = f"local file not found: {local_file}"
                 return
+
+            # 如果是视频文件, 提取音频给 ASR, 视频用于预览
+            video_exts = {".mp4", ".webm", ".mkv", ".mov", ".avi"}
+            ext = os.path.splitext(local_file)[1].lower()
+            is_video = ext in video_exts
+            audio_path = file_path
+
+            if is_video:
+                # 从视频中提取音频
+                audio_path = os.path.splitext(file_path)[0] + ".mp3"
+                if not os.path.isfile(audio_path):
+                    import subprocess
+                    subprocess.run(
+                        ["/opt/homebrew/bin/ffmpeg", "-y", "-i", file_path,
+                         "-vn", "-acodec", "libmp3lame", "-q:a", "2", audio_path],
+                        capture_output=True, text=True, timeout=600,
+                    )
+                    if not os.path.isfile(audio_path):
+                        audio_path = file_path  # 回退: 直接用视频文件
+
             from ingestion.asr import transcribe
-            asr_result = transcribe(file_path, language="zh")
+            asr_result = transcribe(audio_path, language="zh")
             result = {
                 "channel": "asr",
                 "ok": asr_result["ok"],
                 "text": asr_result.get("text", ""),
-                "path": file_path,
+                "path": audio_path,
+                "video_path": file_path if is_video else "",
                 "title": os.path.splitext(local_file)[0],
-                "ext": os.path.splitext(local_file)[1].lstrip("."),
-                "mode": "audio",
+                "ext": ext.lstrip("."),
+                "mode": "video" if is_video else "audio",
                 "source": "whisper",
                 "language": "zh",
                 "segments": asr_result.get("segments", []),
