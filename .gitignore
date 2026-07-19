@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# Runtime
+.pid
+*.log
+*.pid
+
+# Downloads (large files, not versioned)
+downloads/
+
+# Transcripts (output, not versioned)
+transcripts/
+
+# Secrets
+cookies.txt
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+
+# Playwright profile
+.pw_profile/
+
+# Test files
+_wtest
+*.wtest
+
+# Local ASR service
+local_asr.py
+
+# Install logs
+.install*.log

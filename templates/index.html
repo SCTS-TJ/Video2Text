@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Video2Text · 社媒视频一键转文案</title>
+<style>
+  :root{
+    --bg:#0b0f1a; --panel:#121826; --panel2:#1a2236; --line:#26304a;
+    --txt:#e6ecf7; --sub:#8a97b3; --accent:#6c8cff; --accent2:#34d399;
+    --danger:#f87171; --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    background:radial-gradient(1200px 600px at 70% -10%,#1b2540 0%,var(--bg) 55%);
+    color:var(--txt);height:100vh;overflow:hidden;padding:18px 28px;
+  }
+  .wrap{max-width:1280px;margin:0 auto;height:100%;display:flex;flex-direction:column}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-shrink:0}
+  .logo{
+    width:40px;height:40px;border-radius:11px;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#0b0f1a;
+  }
+  h1{font-size:20px;letter-spacing:.5px}
+  h1 small{display:block;font-size:11px;color:var(--sub);font-weight:400;margin-top:2px}
+  .bar{
+    display:flex;gap:10px;background:var(--panel);border:1px solid var(--line);
+    border-radius:var(--radius);padding:10px 12px;margin-bottom:14px;flex-shrink:0;
+  }
+  .bar input{
+    flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:10px;padding:10px 14px;font-size:14px;outline:none;transition:.2s;
+  }
+  .bar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,140,255,.15)}
+  .bar button{
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;border:none;
+    font-weight:700;padding:0 20px;border-radius:10px;cursor:pointer;font-size:14px;transition:.15s;
+  }
+  .bar button:disabled{opacity:.5;cursor:not-allowed}
+  .bar input:disabled{opacity:.4}
+  /* 离线模式切换栏 */
+  .offline-bar{
+    display:flex;align-items:center;gap:10px;flex-shrink:0;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:8px 14px;margin-bottom:14px;font-size:13px;color:var(--sub);
+  }
+  .offline-bar label{display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  .offline-bar input[type=checkbox]{accent-color:var(--accent2);width:16px;height:16px;cursor:pointer}
+  .offline-bar select{
+    flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:6px 10px;font-size:12px;outline:none;cursor:pointer;
+    max-width:360px;
+  }
+  .offline-bar select:focus{border-color:var(--accent)}
+  .offline-bar select:disabled{opacity:.4;cursor:not-allowed}
+  .offline-bar .hint{font-size:11px;color:var(--sub);white-space:nowrap}
+
+
+  .row{display:flex;gap:16px;flex:1;min-height:0}
+  .col{
+    flex:1;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    display:flex;flex-direction:column;min-height:0;max-height:100%;
+  }
+  .col .head{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--sub);flex-shrink:0;
+  }
+  .col .head b{color:var(--txt);font-weight:600}
+  .stage{
+    flex:1;display:flex;align-items:center;justify-content:center;
+    padding:10px;background:#0a0e18;min-height:0;overflow:hidden;
+  }
+  .stage iframe,.stage video,.stage audio{
+    max-width:100%;max-height:100%;border-radius:8px;background:#000;width:100%;height:100%;
+    object-fit:contain;
+  }
+  .placeholder{color:var(--sub);text-align:center;font-size:13px;line-height:1.6}
+  .placeholder .big{font-size:30px;margin-bottom:6px}
+  .textwrap{
+    flex:1;overflow-y:auto;padding:10px 14px;font-size:14px;line-height:1.75;color:#d6deef;min-height:0;
+  }
+  .seg-row{
+    display:flex;gap:10px;padding:8px 6px;transition:background .15s;border-radius:6px;
+    border-left:3px solid transparent;
+  }
+  .seg-row:nth-child(odd){background:rgba(255,255,255,.02)}
+  .seg-row:hover{background:rgba(108,140,255,.08);border-left-color:var(--accent2)}
+  .seg-row:last-child{margin-bottom:0}
+  .seg-time{
+    flex-shrink:0;font-size:11px;font-weight:600;color:var(--accent2);font-variant-numeric:tabular-nums;
+    cursor:pointer;padding:2px 8px;border-radius:4px;min-width:68px;text-align:center;transition:.12s;
+    line-height:1.6;align-self:flex-start;margin-top:2px;background:rgba(52,211,153,.08);
+    font-family:"SF Mono",Menlo,monospace;letter-spacing:.3px;
+  }
+  .seg-time:hover{background:var(--accent2);color:#0b0f1a}
+  .seg-text{
+    flex:1;word-break:break-word;white-space:pre-wrap;line-height:1.7;
+    color:#d6deef;
+  }
+  /* 段落间距 (连续分段之间的视觉呼吸) */
+  .segs{margin:0}
+  .segs + .text-plain{margin-top:12px}
+  .text-plain{white-space:pre-wrap;word-break:break-word}
+  .tools{
+    display:flex;gap:6px;padding:10px 14px;border-top:1px solid var(--line);flex-wrap:wrap;flex-shrink:0;
+  }
+  .tools button{
+    background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;
+    padding:6px 12px;font-size:12px;cursor:pointer;transition:.15s;
+  }
+  .tools button:hover{border-color:var(--accent)}
+  .tools button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;border:none;font-weight:600}
+  .tools button.soon{opacity:.5;cursor:not-allowed}
+  .status{
+    padding:8px 14px;font-size:12px;border-top:1px solid var(--line);flex-shrink:0;
+  }
+  .status.ok{color:var(--accent2)} .status.err{color:var(--danger)} .status.run{color:var(--accent)}
+  .pill{
+    display:inline-block;background:var(--panel2);border:1px solid var(--line);
+    border-radius:99px;padding:2px 8px;font-size:11px;color:var(--sub);
+  }
+  .textwrap::-webkit-scrollbar{width:5px}
+  .textwrap::-webkit-scrollbar-track{background:transparent}
+  .textwrap::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px}
+  @media (max-width:860px){
+    body{padding:12px}
+    .row{flex-direction:column}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">V2</div>
+    <h1>Video2Text <small>社媒视频一键转文案</small></h1>
+  </header>
+
+  <div class="bar">
+    <input id="urlInput" type="url" placeholder="粘贴视频链接（抖音 / 小红书 / B站 / YouTube…）" autofocus
+      onkeydown="if(event.key==='Enter') startIngest()" />
+    <button id="goBtn" onclick="startIngest()">提取文案</button>
+  </div>
+
+
+  <!-- 离线模式 -->
+  <div class="offline-bar">
+    <label><input type="checkbox" id="offlineToggle" onchange="toggleOffline()"> 📁 离线模式</label>
+    <select id="fileSelect" disabled onchange="onFileSelect()">
+      <option value="">— 选择已有音频文件 —</option>
+    </select>
+    <span class="hint" id="offlineHint">跳过下载，直接用已有文件测试</span>
+  </div>
+
+
+  <div class="row">
+    <div class="col">
+      <div class="head"><b>📺 预览</b><span id="left-meta" class="pill">等待输入</span></div>
+      <div class="stage" id="stage">
+        <div class="placeholder"><div class="big">🎬</div>在上方粘贴视频链接<br />点击「提取文案」开始</div>
+      </div>
+    </div>
+
+    <div class="col" id="rightCol">
+      <div class="head"><b>📝 文案</b><span id="right-meta" class="pill">等待处理</span></div>
+      <div class="textwrap" id="text">
+        <div class="placeholder"><div class="big">💬</div>转写结果将在这里展示</div>
+      </div>
+      <div class="tools">
+        <button class="primary" id="copy">📋 复制</button>
+        <button id="exp-txt">📄 导出 TXT</button>
+        <button id="exp-md">📝 导出 MD</button>
+        <button class="soon" id="polish">✨ 一键润色</button>
+        <button class="soon" id="quote">💎 金句提炼</button>
+      </div>
+      <div class="status" id="status">就绪</div>
+    </div>
+  </div>
+</div>
+
+<script>
+
+const $ = id => document.getElementById(id);
+let pollTimer = null;
+let lastText = "";
+let lastSegments = [];
+let mediaEl = null;
+let isYoutube = false;
+let ytPlayer = null;
+
+function formatTime(sec){
+  if(sec == null || isNaN(sec)) return "00:00";
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+}
+
+async function startIngest(){
+  const url = $("urlInput").value.trim();
+  if(!url) return;
+  $("goBtn").disabled = true;
+  $("stage").innerHTML = '<div class="placeholder"><div class="big">\u23f3</div>正在处理，请稍候</div>';
+  $("text").innerHTML = "";
+  $("right-meta").textContent = "";
+  if(pollTimer) clearInterval(pollTimer);
+  lastText = "";
+  lastSegments = [];
+  mediaEl = null;
+  isYoutube = false;
+  ytPlayer = null;
+
+  try{
+    const isOffline = $("offlineToggle").checked;
+    let body;
+    if(isOffline){
+      const file = $("fileSelect").value;
+      if(!file){ setStatus("请选择要测试的音频文件", "err"); $("goBtn").disabled = false; return; }
+      body = JSON.stringify({url: file, local_file: file, force_download: false});
+    } else {
+      body = JSON.stringify({url, force_download: false});
+    }
+    const r1 = await fetch("/api/ingest", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body
+    });
+    const t = await r1.json();
+    if(!r1.ok){ setStatus("失败：" + (t.detail||"未知错误"), "err"); $("goBtn").disabled = false; return; }
+    const taskId = t.task_id;
+    setStatus("下载中…", "run");
+
+    pollTimer = setInterval(async () => {
+      try{
+        const r2 = await fetch("/api/task/" + taskId);
+        const d = await r2.json();
+        const s = d.status;
+        const res = d.result || {};
+
+        if(s === "downloading") setStatus("\u23eb 下载中…", "run");
+        else if(s === "transcribing") setStatus("\ud83c\udf99 语音转写中… (可能需要几分钟)", "run");
+        else if(s === "error"){ setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; }
+        else if(s === "done"){
+          clearInterval(pollTimer);
+          renderResult(res, url);
+          $("goBtn").disabled = false;
+        }
+      }catch(e){ /* retry */ }
+    }, 2000);
+
+  }catch(e){
+    setStatus("请求出错：" + e.message, "err");
+    $("goBtn").disabled = false;
+  }
+}
+
+function renderResult(d, url){
+  isYoutube = !!d.embed_url;
+  lastText = d.text || "";
+  lastSegments = d.segments || [];
+
+  // ==== LEFT: PREVIEW ====
+  const stage = $("stage");
+  if(d.embed_url){
+    stage.innerHTML = `<iframe id="ytFrame" src="${d.embed_url}" frameborder="0" allowfullscreen></iframe>`;
+    $("left-meta").textContent = "\u25b6 YouTube";
+    const iframe = document.getElementById("ytFrame");
+    iframe.onload = () => { try{ ytPlayer = iframe.contentWindow; }catch(e){} };
+  } else if(d.file_url && d.has_media !== false){
+    const isAudio = d.mode === "audio";
+    const tag = isAudio ? "audio" : "video";
+    stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
+    mediaEl = document.getElementById("mediaPlayer");
+    $("left-meta").textContent = isAudio ? "\ud83c\udfb5 音频" : "\ud83c\udfac 视频";
+  } else if(d.channel === "transcript"){
+    stage.innerHTML = '<div class="placeholder"><div class="big">\ud83d\udcdd</div>字幕直取，无需媒体</div>';
+    $("left-meta").textContent = "字幕模式";
+  } else {
+    stage.innerHTML = '<div class="placeholder"><div class="big">\ud83d\udce6</div>已处理</div>';
+    $("left-meta").textContent = "完成";
+  }
+
+  // ==== RIGHT: TEXT ====
+  if(d.channel === "asr"){
+    if(lastSegments && lastSegments.length > 0){
+      renderSegments(lastSegments);
+    } else {
+      $("text").innerHTML = `<div class="text-plain">${escHtml(lastText)}</div>`;
+    }
+    $("right-meta").textContent = "Whisper 转写" + (d.duration ? ` · ${formatTime(d.duration)}` : "");
+    setStatus("\u2705 ASR 转写完成", "ok");
+  } else if(d.channel === "transcript"){
+    if(lastSegments && lastSegments.length > 0){
+      renderSegments(lastSegments);
+    } else {
+      $("text").innerHTML = `<div class="text-plain">${escHtml(lastText)}</div>`;
+    }
+    $("right-meta").textContent = `字幕 ${d.source==="manual"?"手动":"自动"} · ${d.language||"?"}`;
+    setStatus("\u2705 字幕直取成功", "ok");
+  } else if(d.channel === "download_audio"){
+    $("text").innerHTML = '<div class="placeholder"><div class="big">\u23f3</div>音频已下载，正在后台转写…</div>';
+    $("right-meta").textContent = "\u23f3 等待转写";
+    setStatus("音频已下载，等待转写完成", "run");
+  } else {
+    $("text").innerHTML = '<div class="placeholder"><div class="big">\u2705</div>下载完成</div>';
+    $("right-meta").textContent = d.mode || "";
+    setStatus("\u2705 下载完成", "ok");
+  }
+}
+
+function renderSegments(segments){
+  if(!segments || !segments.length){
+    $("text").innerHTML = `<div class="text-plain">${escHtml(lastText)}</div>`;
+    return;
+  }
+  let html = '<div class="segs">';
+  for(const seg of segments){
+    const start = seg.start || 0;
+    const end = seg.end || start;
+    const label = `${formatTime(start)} - ${formatTime(end)}`;
+    const txt = escHtml(seg.text || "");
+    html += '<div class="seg-row">';
+    html += `<span class="seg-time" data-time="${start}" onclick="seekTo(${start})" title="点击跳转到 ${formatTime(start)}">${label}</span>`;
+    html += `<span class="seg-text">${txt}</span>`;
+    html += '</div>';
+  }
+  html += '</div>';
+  $("text").innerHTML = html;
+}
+
+function seekTo(time){
+  if(mediaEl && typeof mediaEl.currentTime === "number"){
+    mediaEl.currentTime = time;
+    mediaEl.play().catch(() => {});
+  } else if(isYoutube && ytPlayer){
+    ytPlayer.postMessage(JSON.stringify({
+      event: "command", func: "seekTo", args: [time, true]
+    }), "*");
+    ytPlayer.postMessage(JSON.stringify({
+      event: "command", func: "playVideo", args: []
+    }), "*");
+  }
+}
+
+function escHtml(str){
+  if(!str) return "";
+  const d = document.createElement("div");
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+$("copy").onclick = () => {
+  if(!lastText){ setStatus("暂无文字", "err"); return; }
+  navigator.clipboard.writeText(lastText)
+    .then(() => setStatus("\u2705 已复制", "ok"))
+    .catch(() => setStatus("复制失败", "err"));
+};
+
+$("exp-txt").onclick = () => {
+  if(!lastText){ setStatus("暂无文字", "err"); return; }
+  let content = lastText;
+  if(lastSegments && lastSegments.length){
+    content = lastSegments.map(s => `[${formatTime(s.start)}] ${s.text}`).join("\n");
+  }
+  download(content, "transcript.txt", "text/plain");
+};
+
+$("exp-md").onclick = () => {
+  if(!lastText){ setStatus("暂无文字", "err"); return; }
+  const header = lastSegments && lastSegments.length ? "# 视频提取文案（带时间戳）\n\n" : "# 视频提取文案\n\n";
+  let content = header;
+  if(lastSegments && lastSegments.length){
+    content += lastSegments.map(s => `**${formatTime(s.start)}** ${s.text}`).join("\n\n");
+  }
+  download(content, "transcript.md", "text/markdown");
+};
+
+$("polish").onclick = () => setStatus("「一键润色」将在接入 LLM 后启用", "run");
+$("quote").onclick  = () => setStatus("「金句提炼」将在接入 LLM 后启用", "run");
+
+function download(content, name, type){
+  const blob = new Blob([content], {type});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  URL.revokeObjectURL(a.href);
+}
+function setStatus(msg, cls){ const s=$("status"); s.textContent=msg; s.className="status "+(cls||""); }
+
+// ---- 离线模式 ----
+async function toggleOffline(){
+  const on = $("offlineToggle").checked;
+  $("fileSelect").disabled = !on;
+  $("urlInput").disabled = on;
+  $("offlineHint").textContent = on ? "选择已有文件直接 ASR 转写，无需下载" : "跳过下载，直接用已有文件测试";
+  if(on){
+    // 加载文件列表
+    try{
+      const r = await fetch("/api/files");
+      const files = await r.json();
+      const sel = $("fileSelect");
+      sel.innerHTML = '<option value="">— 选择已有音频文件 —</option>';
+      if(files.length === 0){
+        sel.innerHTML += '<option value="" disabled>📭 暂无可用文件</option>';
+      } else {
+        for(const f of files){
+          const opt = document.createElement("option");
+          opt.value = f.name;
+          opt.textContent = `${f.name} (${f.size_mb}MB, ${f.ext})`;
+          sel.appendChild(opt);
+        }
+      }
+    }catch(e){
+      $("offlineHint").textContent = "⚠️ 加载文件列表失败";
+    }
+  }
+}
+
+function onFileSelect(){
+  const file = $("fileSelect").value;
+  if(file){
+    $("urlInput").value = "📁 " + file;
+    $("offlineHint").textContent = `已选择: ${file}，点击「提取文案」开始离线转写`;
+  }
+}
+
+// 页面加载时预加载文件列表
+document.addEventListener("DOMContentLoaded", () => {
+  fetch("/api/files").then(r => r.json()).then(files => {
+    if(files.length > 0){
+      const sel = $("fileSelect");
+      for(const f of files){
+        const opt = document.createElement("option");
+        opt.value = f.name;
+        opt.textContent = `${f.name} (${f.size_mb}MB, ${f.ext})`;
+        sel.appendChild(opt);
+      }
+    }
+  }).catch(() => {});
+});
+</script>
+</body>
+</html>
