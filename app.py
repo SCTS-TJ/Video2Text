@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from ingestion import ingest
+from ingestion.index import add_entry
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
@@ -31,7 +32,41 @@ TEMPLATE = os.path.join(BASE_DIR, "templates", "index.html")
 os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
 
 
-def _save_transcript(result: dict, url: str) -> str:
+def _index_entry(result: dict) -> None:
+    """将转写结果写入 transcripts/index.json 持久索引"""
+    text = result.get("text", "")
+    if not text:
+        return
+    segs = result.get("segments", [])
+    title = result.get("title") or "untitled"
+    dur = result.get("duration", 0)
+    lang = result.get("language", "?")
+    media_type = result.get("media_type", "audio")
+
+    # 取音频文件名作为 key
+    audio_path = result.get("path") or ""
+    name = os.path.basename(audio_path)
+
+    # file_url
+    file_url = ""
+    if result.get("video_path"):
+        vn = os.path.basename(result["video_path"])
+        file_url = f"/files/{vn}"
+    elif audio_path:
+        file_url = f"/files/{name}"
+
+    add_entry(
+        media_name=name,
+        segments=segs,
+        duration=dur,
+        title=title,
+        file_url=file_url,
+        media_type=media_type,
+        language=lang,
+    )
+
+
+def _save_transcript(result: dict, url: str) -> tuple[str, str]:
     """自动落盘: .txt(纯文本) + .md(带时间戳)"""
     text = result.get("text", "")
     if not text:
@@ -66,7 +101,7 @@ def _save_transcript(result: dict, url: str) -> str:
         else:
             f.write(text)
 
-    return txt_name
+    return txt_name, md_name
 
 app = FastAPI(title="Video2Text")
 
@@ -184,9 +219,8 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["result"] = _build_payload(result, url)
                 tasks[task_id]["error"] = result["error"]
                 _save_transcript(result, url)
+                _index_entry(result)
             return
-
-        # ===== 在线模式: 下载 + ASR =====
         # 阶段1: 采集 (下载 或 字幕直取)
         with tasks_lock:
             tasks[task_id]["status"] = "downloading"
@@ -205,6 +239,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["status"] = "done"
                 tasks[task_id]["result"] = _build_payload(result, url)
                 _save_transcript(result, url)
+                _index_entry(result)
             return
 
         # 下载通道: 需要 ASR
@@ -227,6 +262,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             tasks[task_id]["status"] = "done"
             tasks[task_id]["result"] = _build_payload(result, url)
             _save_transcript(result, url)
+            _index_entry(result)
 
     except Exception as e:
         with tasks_lock:
@@ -271,6 +307,7 @@ def api_files() -> list[dict]:
                     "name": name,
                     "size_mb": round(size_mb, 1),
                     "ext": ext.lstrip("."),
+                    "file_url": f"/files/{name}",
                     "modified": datetime.fromtimestamp(mtime).strftime("%m-%d %H:%M"),
                 })
     return files
