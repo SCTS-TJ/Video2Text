@@ -154,6 +154,11 @@ class RenameReq(BaseModel):
     new_name: str
 
 
+class DeleteReq(BaseModel):
+    name: str
+    keep_index: bool = False  # 是否保留索引记录
+
+
 def _youtube_embed(url: str) -> "str | None":
     h = urlparse(url).hostname or ""
     if "youtube" in h or "youtu.be" in h:
@@ -469,6 +474,72 @@ def api_rename(req: RenameReq) -> list[dict]:
         _save(idx)
     
     # 4. 返回更新后的文件列表
+    return api_files()
+
+
+@app.post("/api/delete")
+def api_delete(req: DeleteReq) -> list[dict]:
+    """删除 downloads/ 下的文件, 可选是否同时从 index.json 移除。
+    同名 mp3+mp4 会一起删除 (配对文件)。
+    """
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    if "/" in name or ".." in name:
+        raise HTTPException(status_code=400, detail="invalid filename")
+
+    path = os.path.join(DOWNLOAD_DIR, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"file not found: {name}")
+
+    deleted = []
+    try:
+        os.remove(path)
+        deleted.append(name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"delete failed: {e}")
+
+    # 同时删除配对文件 (mp4 <-> mp3)
+    base, ext = os.path.splitext(name)
+    if ext.lower() == ".mp4":
+        pair_name = base + ".mp3"
+    elif ext.lower() == ".mp3":
+        pair_name = base + ".mp4"
+    else:
+        pair_name = None
+    if pair_name:
+        pair_path = os.path.join(DOWNLOAD_DIR, pair_name)
+        if os.path.isfile(pair_path):
+            try:
+                os.remove(pair_path)
+                deleted.append(pair_name)
+            except Exception:
+                pass  # 配对删除失败不影响主操作
+
+    # 从 index.json 移除 (默认保留, 让用户可选)
+    if not req.keep_index:
+        from ingestion.index import _load, _save
+        idx = _load()
+        files_dict = idx.get("files", {})
+        changed = False
+        for n in deleted:
+            # 主键 + 该键可能被别名引用 (related_files/aliases)
+            if n in files_dict:
+                del files_dict[n]
+                changed = True
+            else:
+                # 例如删 mp4 但索引中是 mp3 为主键
+                for k in list(files_dict.keys()):
+                    entry = files_dict[k]
+                    rels = entry.get("related_files") or entry.get("aliases") or []
+                    if n in rels:
+                        # 也移除该主键 (因为关联文件不存在了)
+                        del files_dict[k]
+                        changed = True
+                        break
+        if changed:
+            _save(idx)
+
     return api_files()
 
 
