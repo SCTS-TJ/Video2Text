@@ -173,6 +173,25 @@
     color:#0b0f1a;
     font-weight:700;
   }
+  /* 对齐偏移控制条 */
+  .offset-bar{
+    display:flex;align-items:center;gap:6px;flex-shrink:0;
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:6px 12px;margin-bottom:8px;font-size:12px;color:var(--sub);
+  }
+  .offset-bar .lbl{font-size:11px;color:var(--sub);white-space:nowrap}
+  .offset-bar button{
+    background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:3px 8px;font-size:11px;cursor:pointer;transition:.12s;
+    min-width:32px;font-variant-numeric:tabular-nums;
+  }
+  .offset-bar button:hover{background:var(--line);border-color:var(--accent);color:var(--accent)}
+  .offset-bar button:disabled{opacity:.3;cursor:not-allowed}
+  .offset-bar .val{
+    display:inline-block;min-width:54px;text-align:center;
+    color:var(--accent2);font-weight:600;font-variant-numeric:tabular-nums;
+  }
+  .offset-bar .reset{margin-left:4px;color:var(--sub)}
   /* “同步跟随”切换按钮 */
   .sync-toggle{
     display:inline-flex;align-items:center;gap:4px;
@@ -249,6 +268,17 @@
 
     <div class="col" id="rightCol">
       <div class="head"><b>📝 文案</b><span id="right-meta" class="pill">等待处理</span><button id="syncToggle" class="sync-toggle on" onclick="toggleSyncFollow()" title="切换是否自动滚动跟随当前字符">⏮ 同步</button></div>
+      <div class="offset-bar" id="offsetBar" style="display:none">
+        <span class="lbl">对齐偏移:</span>
+        <button onclick="adjustOffset(-5)">−5s</button>
+        <button onclick="adjustOffset(-1)">−1s</button>
+        <button onclick="adjustOffset(-0.5)">−0.5s</button>
+        <span class="val" id="offsetVal">0.0s</span>
+        <button onclick="adjustOffset(0.5)">+0.5s</button>
+        <button onclick="adjustOffset(1)">+1s</button>
+        <button onclick="adjustOffset(5)">+5s</button>
+        <button class="reset" onclick="resetOffset()">重置</button>
+      </div>
       <div class="textwrap" id="text">
         <div class="placeholder"><div class="big">💬</div>转写结果将在这里展示</div>
       </div>
@@ -323,6 +353,11 @@ async function startIngest(){
   window._segRows = null;
   window._segData = null;
   _syncTimeupdateBound = false;
+  // 隐藏偏移条
+  const bar = $("offsetBar");
+  if(bar) bar.style.display = "none";
+  timeOffset = 0;
+  updateOffsetUI();
 
   try{
     const isOffline = $("offlineToggle").checked;
@@ -489,7 +524,34 @@ function renderSegments(segments){
   }
   // 重启同步
   lastActiveIdx = -1;
+  // 显示对齐偏移控制条 + 重置偏移
+  const bar = $("offsetBar");
+  if(bar) bar.style.display = "";
   if(syncFollowEnabled) startSyncFollow();
+}
+
+// ==== 对齐偏移 (调整所有时间戳同步偏移) ====
+let timeOffset = 0;  // 秒, 正值代表子幕提前, 负值代表提迟
+
+function adjustOffset(delta){
+  timeOffset = Math.round((timeOffset + delta) * 10) / 10;  // 保留 0.1s
+  updateOffsetUI();
+  // 强制重新刷高亮
+  lastActiveIdx = -1;
+  lastHighlightedWord = -1;
+  if(window._segRows){
+    clearActiveHighlight();
+    if(mediaEl || (isYoutube && typeof _ytCurrentTime === "number")) onMediaTimeUpdate();
+  }
+}
+function resetOffset(){
+  timeOffset = 0;
+  updateOffsetUI();
+  adjustOffset(0);
+}
+function updateOffsetUI(){
+  const v = $("offsetVal");
+  if(v) v.textContent = (timeOffset > 0 ? "+" : "") + timeOffset.toFixed(1) + "s";
 }
 
 // ==== 字幕同步高亮核心 ====
@@ -568,6 +630,8 @@ function onMediaTimeUpdate(){
   } else {
     return;
   }
+  // 应用对齐偏移: 如果子幕提前, t 需要减少 (currentTime 已越过子幕对应时间)
+  t = t - timeOffset;
   // 二分查找当前行 (性能优化)
   const rows = window._segRows;
   let lo = 0, hi = rows.length - 1, found = -1;
