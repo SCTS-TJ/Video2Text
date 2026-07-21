@@ -497,14 +497,24 @@ function renderSegments(segments){
     const end = seg.end || start;
     const label = `${formatTime(start)} - ${formatTime(end)}`;
     const txt = seg.text || "";
-    // 按空格切词, 每个词包裹为 <span class="w">供逐词高亮用
-    const words = txt.split(/(\s+)/);
+    // 优先用真实 word-level timestamps, 否则回退切词
     let wordHtml = "";
-    for(const w of words){
-      if(/^\s+$/.test(w)){
-        wordHtml += w;  // 保留空格/换行
-      } else if(w){
-        wordHtml += `<span class="w">${escHtml(w)}</span>`;
+    if(seg.words && seg.words.length > 0){
+      for(const w of seg.words){
+        const ws = w.start != null ? w.start : 0;
+        const we = w.end != null ? w.end : ws;
+        const word = (w.word || "").trim();
+        if(!word) continue;
+        wordHtml += `<span class="w" data-wstart="${ws}" data-wend="${we}">${escHtml(word)}</span>`;
+      }
+    } else {
+      const words = txt.split(/(\s+)/);
+      for(const w of words){
+        if(/^\s+$/.test(w)){
+          wordHtml += w;
+        } else if(w){
+          wordHtml += `<span class="w">${escHtml(w)}</span>`;
+        }
       }
     }
     html += '<div class="seg-row" data-idx="' + i + '" data-start="' + start + '" data-end="' + end + '">';
