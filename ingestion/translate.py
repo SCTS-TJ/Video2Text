@@ -52,12 +52,12 @@ def translate_segments(segments: list, target_lang: str = "zh-CN") -> list:
     results = []
     for i in range(0, len(texts), BATCH):
         batch = texts[i : i + BATCH]
-        joined = "\n[BREAK]\n".join(batch)
+        joined = "[[BREAK]]".join(batch)
         try:
             translated_joined = translator.translate(joined)
             if translated_joined is None:
                 translated_joined = ""
-            batch_results = translated_joined.split("\n[BREAK]\n")
+            batch_results = translated_joined.split("[[BREAK]]")
             # \u9632\u5fa1: \u4e0d\u8db3\u65f6\u586b\u7a7a
             while len(batch_results) < len(batch):
                 batch_results.append("")

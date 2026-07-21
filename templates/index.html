@@ -153,6 +153,9 @@
   .seg-row.past{opacity:.55}
   .seg-row.active .seg-text{color:#fff}
   .seg-row .seg-text{transition:color .15s}
+  .seg-row .seg-body{
+    flex:1;display:flex;flex-direction:column;
+  }
   /* 中英对照 */
   .seg-row .seg-translation{
     display:block;color:var(--sub);font-size:12px;
@@ -533,7 +536,7 @@ function renderSegments(segments){
         const we = w.end != null ? w.end : ws;
         const word = (w.word || "").trim();
         if(!word) continue;
-        wordHtml += `<span class="w" data-wstart="${ws}" data-wend="${we}">${escHtml(word)}</span>`;
+        wordHtml += `<span class="w" data-wstart="${ws}" data-wend="${we}">${escHtml(word)}</span> `;
       }
     } else {
       const words = txt.split(/(\s+)/);
@@ -541,12 +544,13 @@ function renderSegments(segments){
         if(/^\s+$/.test(w)){
           wordHtml += w;
         } else if(w){
-          wordHtml += `<span class="w">${escHtml(w)}</span>`;
+          wordHtml += `<span class="w">${escHtml(w)}</span> `;
         }
       }
     }
     html += '<div class="seg-row" data-idx="' + i + '" data-start="' + start + '" data-end="' + end + '">';
     html += `<span class="seg-time" data-time="${start}" onclick="seekTo(${start})" title="点击跳转到 ${formatTime(start)}">${label}</span>`;
+    html += '<div class="seg-body">';
     html += `<span class="seg-text">${wordHtml}</span>`;
     if(seg.translation){
       html += `<span class="seg-translation">${escHtml(seg.translation)}</span>`;
@@ -862,7 +866,10 @@ $("translateBtn").onclick = async () => {
           const t = document.createElement("span");
           t.className = "seg-translation";
           t.textContent = newSeg.translation;
-          row.appendChild(t);
+          // 插入到 seg-body 内部
+          const body = row.querySelector(".seg-body");
+          if(body) body.appendChild(t);
+          else row.appendChild(t);
         }
       }
       setStatus("✅ 中英对照已添加", "ok");

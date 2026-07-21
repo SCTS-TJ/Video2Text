@@ -413,14 +413,10 @@ def api_translate(file_name: str = "") -> dict:
     lang = entry.get("language", "zh")
     if lang in ("zh", "zh-CN"):
         return {"ok": True, "translated": False, "reason": "chinese source, no translation needed"}
-    if any(s.get("translation") for s in segs):
-        return {"ok": True, "translated": True, "reason": "already translated", "segments": segs}
     try:
         segs = translate_segments(segs, target_lang="zh-CN")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"translate failed: {e}")
-    entry["segments"] = segs
-    _save(idx)
     return {"ok": True, "translated": True, "segments": segs}
 
 
