@@ -62,6 +62,35 @@
   }
   .offline-bar label{display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
   .offline-bar input[type=checkbox]{accent-color:var(--accent2);width:16px;height:16px;cursor:pointer}
+  .rename-btn{
+    background:none;border:1px solid var(--line);color:var(--sub);font-size:16px;
+    border-radius:6px;cursor:pointer;padding:2px 8px;line-height:1.4;transition:.12s;
+  }
+  .rename-btn:hover{background:var(--panel2);color:var(--accent);border-color:var(--accent)}
+  .rename-btn:disabled{opacity:.3;cursor:not-allowed}
+  .modal-overlay{
+    position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;
+    z-index:1000;backdrop-filter:blur(4px);
+  }
+  .modal-box{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px 28px;min-width:420px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.5);
+  }
+  .modal-box h3{margin:0 0 16px;font-size:16px;color:var(--txt)}
+  .modal-box input{
+    width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:10px 12px;font-size:14px;outline:none;margin-bottom:14px;
+  }
+  .modal-box input:focus{border-color:var(--accent)}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end}
+  .modal-actions button{
+    padding:8px 20px;border-radius:8px;border:none;font-weight:600;font-size:13px;cursor:pointer;transition:.12s;
+  }
+  .modal-actions .btn-cancel{background:var(--panel2);color:var(--sub)}
+  .modal-actions .btn-cancel:hover{background:var(--line)}
+  .modal-actions .btn-confirm{background:var(--accent);color:#fff}
+  .modal-actions .btn-confirm:hover{opacity:.85}
+  .modal-actions .btn-confirm:disabled{opacity:.4;cursor:not-allowed}
   .offline-bar select{
     flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
     border-radius:8px;padding:6px 10px;font-size:12px;outline:none;cursor:pointer;
@@ -168,6 +197,7 @@
     <select id="fileSelect" disabled onchange="onFileSelect()">
       <option value="">— 选择已有音频文件 —</option>
     </select>
+    <button id="renameBtn" class="rename-btn" disabled onclick="showRenameModal()" title="重命名文件">✏️</button>
     <span class="hint" id="offlineHint">跳过下载，直接用已有文件测试</span>
     <span id="existingBadge"></span>
   </div>
@@ -483,40 +513,84 @@ async function toggleOffline(){
   $("urlInput").disabled = on;
   $("offlineHint").textContent = on ? "选择已有文件直接 ASR 转写，无需下载" : "跳过下载，直接用已有文件测试";
   if(on){
-    // 加载文件列表
-    try{
-      const r = await fetch("/api/files");
-      const files = await r.json();
-      const sel = $("fileSelect");
-      sel.innerHTML = '<option value="">— 选择已有音频文件 —</option>';
-      if(files.length === 0){
-        sel.innerHTML += '<option value="" disabled>📭 暂无可用文件</option>';
-      } else {
-        for(const f of files){
-          const opt = document.createElement("option");
-          opt.value = f.name;
-          opt.textContent = `${f.name} (${f.size_mb}MB, ${f.ext})`;
-          sel.appendChild(opt);
-        }
-      }
-    }catch(e){
-      $("offlineHint").textContent = "⚠️ 加载文件列表失败";
-    }
+    loadFileList2();
+  } else {
+    $("renameBtn").disabled = true;
   }
 }
 
 function onFileSelect(){
   const file = $("fileSelect").value;
   if(file){
-    $("urlInput").value = "📁 " + file;
-    $("offlineHint").textContent = `已选择: ${file}，点击「提取文案」开始离线转写`;
+    $("urlInput").value = file;
+    $("offlineHint").textContent = "已选择: " + file + "，点击「提取文案」开始离线转写";
+    $("renameBtn").disabled = false;
     if($("skipExisting").checked) checkExistingTranscript(file);
   } else {
     $("existingBadge").textContent = "";
+    $("renameBtn").disabled = true;
   }
 }
 
 // 页面加载时预加载文件列表
+// ---- 重命名 ----
+function showRenameModal(){
+  const file = $("fileSelect").value;
+  if(!file) return;
+  $("renameInput").value = file;
+  $("renameConfirm").disabled = false;
+  $("renameModal").style.display = "";
+  setTimeout(() => $("renameInput").focus(), 100);
+  const dot = file.lastIndexOf(".");
+  if(dot > 0) $("renameInput").setSelectionRange(0, dot);
+}
+function hideRenameModal(){ $("renameModal").style.display = "none"; }
+async function doRename(){
+  const oldName = $("fileSelect").value;
+  const newName = $("renameInput").value.trim();
+  if(!oldName || !newName || oldName === newName){ hideRenameModal(); return; }
+  $("renameConfirm").disabled = true;
+  $("renameConfirm").textContent = "重命名中…";
+  try{
+    const r = await fetch("/api/rename", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({old_name: oldName, new_name: newName})
+    });
+    if(!r.ok){
+      const err = await r.json();
+      setStatus("\u2716 " + (err.detail || "\u91cd\u547d\u540d\u5931\u8d25"), "err");
+      $("renameConfirm").disabled = false;
+      $("renameConfirm").textContent = "\u786e\u5b9a\u91cd\u547d\u540d";
+      return;
+    }
+    hideRenameModal();
+    setStatus("\u2705 已\u91cd\u547d\u540d", "ok");
+    await loadFileList2();
+    $("fileSelect").value = newName;
+    $("urlInput").value = newName;
+    if($("skipExisting").checked) checkExistingTranscript(newName);
+    $("renameBtn").disabled = false;
+  }catch(e){
+    setStatus("\u2716 \重\u547d\u540d\u5931\u8d25: " + e.message, "err");
+    $("renameConfirm").disabled = false;
+    $("renameConfirm").textContent = "\u786e\u5b9a\u91cd\u547d\u540d";
+  }
+}
+
+// ---- 页面加载时预加载文件列表 ----
+function loadFileList2(){
+  fetch("/api/files").then(r => r.json()).then(files => {
+    const sel = $("fileSelect");
+    sel.innerHTML = '<option value="">— 选择已有音频文件 —</option>';
+    for(const f of files){
+      const opt = document.createElement("option");
+      opt.value = f.name;
+      opt.textContent = f.name + " (" + f.size_mb + "MB, " + f.ext + ")";
+      sel.appendChild(opt);
+    }
+  }).catch(() => {});
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   fetch("/api/files").then(r => r.json()).then(files => {
     if(files.length > 0){
@@ -540,5 +614,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 </script>
+<!-- 重命名弹窗 -->
+<div id="renameModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideRenameModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <h3>✏️ 重命名文件</h3>
+    <input id="renameInput" type="text" placeholder="输入新文件名（保留后缀）" onkeydown="if(event.key==='Enter') doRename()" />
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideRenameModal()">取消</button>
+      <button id="renameConfirm" class="btn-confirm" onclick="doRename()">确定重命名</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>

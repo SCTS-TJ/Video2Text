@@ -149,6 +149,11 @@ class IngestReq(BaseModel):
     local_file: str = ""  # 离线模式: 直接用已有文件, 跳过下载
 
 
+class RenameReq(BaseModel):
+    old_name: str
+    new_name: str
+
+
 def _youtube_embed(url: str) -> "str | None":
     h = urlparse(url).hostname or ""
     if "youtube" in h or "youtu.be" in h:
@@ -391,6 +396,80 @@ def api_check_existing(file_name: str = "") -> dict:
         "transcribed": entry is not None,
         "entry": entry,
     }
+
+
+@app.post("/api/rename")
+def api_rename(req: RenameReq) -> list[dict]:
+    """重命名 downloads/ 下的文件，同步更新 index.json。
+    支持配对重命名: .mp4 和 .mp3 同时重命名。
+    """
+    old = req.old_name.strip()
+    new = req.new_name.strip()
+    if not old or not new:
+        raise HTTPException(status_code=400, detail="old_name and new_name required")
+    if "/" in new or ".." in new or "/" in old or ".." in old:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    
+    old_ext = os.path.splitext(old)[1].lower()
+    new_ext = os.path.splitext(new)[1].lower()
+    if not old_ext or not new_ext:
+        raise HTTPException(status_code=400, detail="filename must have extension")
+    if old_ext != new_ext:
+        raise HTTPException(status_code=400, detail="cannot change file extension")
+    
+    old_path = os.path.join(DOWNLOAD_DIR, old)
+    if not os.path.isfile(old_path):
+        raise HTTPException(status_code=404, detail=f"file not found: {old}")
+    new_path = os.path.join(DOWNLOAD_DIR, new)
+    if os.path.isfile(new_path):
+        raise HTTPException(status_code=409, detail=f"target filename already exists: {new}")
+    
+    renamed = []
+    
+    # 1. 重命名主文件
+    os.rename(old_path, new_path)
+    renamed.append((old, new))
+    
+    # 2. 查找配对文件 (mp4 <-> mp3) 并重命名
+    base_old, _ = os.path.splitext(old)
+    base_new, _ = os.path.splitext(new)
+    if old_ext == ".mp4":
+        pair_old = base_old + ".mp3"
+        pair_new = base_new + ".mp3"
+        pair_old_path = os.path.join(DOWNLOAD_DIR, pair_old)
+        if os.path.isfile(pair_old_path):
+            pair_new_path = os.path.join(DOWNLOAD_DIR, pair_new)
+            if not os.path.isfile(pair_new_path):
+                os.rename(pair_old_path, pair_new_path)
+                renamed.append((pair_old, pair_new))
+    elif old_ext == ".mp3":
+        pair_old = base_old + ".mp4"
+        pair_new = base_new + ".mp4"
+        pair_old_path = os.path.join(DOWNLOAD_DIR, pair_old)
+        if os.path.isfile(pair_old_path):
+            pair_new_path = os.path.join(DOWNLOAD_DIR, pair_new)
+            if not os.path.isfile(pair_new_path):
+                os.rename(pair_old_path, pair_new_path)
+                renamed.append((pair_old, pair_new))
+    
+    # 3. 更新 index.json: 将旧 key 迁移到新 key
+    from ingestion.index import _load, _save, remove_entry
+    idx = _load()
+    files_dict = idx.get("files", {})
+    changed = False
+    for old_name_in_idx, new_name_in_idx in renamed:
+        if old_name_in_idx in files_dict:
+            entry = files_dict.pop(old_name_in_idx)
+            # 更新 file_url 和 title
+            entry["file_url"] = f"/files/{new_name_in_idx}"
+            entry["title"] = os.path.splitext(new_name_in_idx)[0]
+            files_dict[new_name_in_idx] = entry
+            changed = True
+    if changed:
+        _save(idx)
+    
+    # 4. 返回更新后的文件列表
+    return api_files()
 
 
 @app.get("/api/files")
