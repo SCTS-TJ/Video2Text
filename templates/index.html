@@ -305,6 +305,7 @@
       </div>
       <div class="tools">
         <button class="primary" id="copy">📋 复制</button>
+        <button class="primary" id="translateBtn" title="手动调用 Google 翻译 (Google Translate 免费)">🌐 中英对照</button>
         <button id="exp-txt">📄 导出 TXT</button>
         <button id="exp-md">📝 导出 MD</button>
         <button class="soon" id="polish">✨ 一键润色</button>
@@ -342,6 +343,7 @@ async function startIngest(){
     try {
       const r = await fetch("/api/check-existing?file_name=" + encodeURIComponent(file));
       const d = await r.json();
+      currentFileName = file;
       if(d.transcribed && d.entry && d.entry.segments && d.entry.segments.length > 0){
         $("goBtn").disabled = false;
         lastText = d.entry.segments.map(s => s.text).join(" ");
@@ -599,6 +601,7 @@ function updateOffsetUI(){
 
 // 同步状态
 let syncFollowEnabled = true;   // 是否自动滚动跟随
+let currentFileName = null;
 let lastActiveIdx = -1;          // 上次激活的行 (-1 = 无)
 let lastHighlightedWord = -1;    // 上次高亮的词 (避免 DOM 抖动)
 let _syncRafId = null;           // requestAnimationFrame ID (用于词级更新)
@@ -818,6 +821,64 @@ function escHtml(str){
 $("copy").onclick = () => {
   if(!lastText){ setStatus("暂无文字", "err"); return; }
   navigator.clipboard.writeText(lastText)
+    .then(() => setStatus("✅ 已复制", "ok"))
+    .catch(() => setStatus("复制失败", "err"));
+};
+$("exp-md").onclick = () => setStatus("「导出 markdown」将在接入 LLM 后启用", "run");
+
+// ==== 中英对照 手动触发 ====
+$("translateBtn").onclick = async () => {
+  if(!lastText){ setStatus("暂无文字可翻译", "err"); return; }
+  if(!currentFileName){ setStatus("请先选择一个文件", "err"); return; }
+  $("translateBtn").disabled = true;
+  const old = $("translateBtn").textContent;
+  $("translateBtn").textContent = "翻译中…";
+  try{
+    const r = await fetch("/api/translate?file_name=" + encodeURIComponent(currentFileName), {method:"POST"});
+    if(!r.ok){
+      const err = await r.json();
+      setStatus("✖ " + (err.detail || "翻译失败"), "err");
+      $("translateBtn").disabled = false;
+      $("translateBtn").textContent = old;
+      return;
+    }
+    const d = await r.json();
+    if(d.translated && d.segments){
+      // 刷新当前呈示: 保存 segments, 重新渲染
+      lastSegments = d.segments;
+      _segData = d.segments;
+      // 重构 segRows
+      _segRows = [];
+      const rows = $("text").querySelectorAll(".seg-row");
+      // 不是重新构建, 只是从 d.segments 同步 “中英对照”部分
+      for(let i = 0; i < rows.length && i < d.segments.length; i++){
+        const newSeg = d.segments[i];
+        if(!newSeg.translation) continue;
+        const row = rows[i];
+        // 判断是否已经有 translation span
+        if(row.querySelector(".seg-translation")){
+          row.querySelector(".seg-translation").textContent = newSeg.translation;
+        } else {
+          const t = document.createElement("span");
+          t.className = "seg-translation";
+          t.textContent = newSeg.translation;
+          row.appendChild(t);
+        }
+      }
+      setStatus("✅ 中英对照已添加", "ok");
+    } else {
+      setStatus(d.reason || "不需要翻译", "ok");
+    }
+  }catch(e){
+    setStatus("✖ 翻译错误: " + e.message, "err");
+  }
+  $("translateBtn").disabled = false;
+  $("translateBtn").textContent = old;
+};
+
+$("copy").onclick = () => {
+  if(!lastText){ setStatus("暂无文字", "err"); return; }
+  navigator.clipboard.writeText(lastText)
     .then(() => setStatus("\u2705 已复制", "ok"))
     .catch(() => setStatus("复制失败", "err"));
 };
@@ -897,12 +958,14 @@ async function toggleOffline(){
 function onFileSelect(){
   const file = $("fileSelect").value;
   if(file){
+    currentFileName = file;
     $("urlInput").value = file;
     $("offlineHint").textContent = "已选择: " + file + "，点击「提取文案」开始离线转写";
     $("renameBtn").disabled = false;
     $("deleteBtn").disabled = false;
     if($("skipExisting").checked) checkExistingTranscript(file);
   } else {
+    currentFileName = null;
     $("existingBadge").textContent = "";
     $("renameBtn").disabled = true;
     $("deleteBtn").disabled = true;

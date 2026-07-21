@@ -390,6 +390,40 @@ def api_stop(task_id: str) -> dict:
     return {"task_id": task_id, "status": "cancelling", "message": "正在停止..."}
 
 
+@app.post("/api/translate")
+def api_translate(file_name: str = "") -> dict:
+    """给已有转写记录补中英对照翻译。
+    请求参数: ?file_name=xxx
+    若语言为中文 (或已经译过), 返回 translated=False。
+    """
+    from ingestion.translate import translate_segments
+    if not file_name:
+        raise HTTPException(status_code=400, detail="file_name required")
+    if "/" in file_name or ".." in file_name:
+        raise HTTPException(status_code=400, detail="invalid filename")
+    from ingestion.index import _load, _save
+    idx = _load()
+    files_dict = idx.get("files", {})
+    if file_name not in files_dict:
+        raise HTTPException(status_code=404, detail=f"not in index: {file_name}")
+    entry = files_dict[file_name]
+    segs = entry.get("segments", [])
+    if not segs:
+        raise HTTPException(status_code=400, detail="no segments")
+    lang = entry.get("language", "zh")
+    if lang in ("zh", "zh-CN"):
+        return {"ok": True, "translated": False, "reason": "chinese source, no translation needed"}
+    if any(s.get("translation") for s in segs):
+        return {"ok": True, "translated": True, "reason": "already translated", "segments": segs}
+    try:
+        segs = translate_segments(segs, target_lang="zh-CN")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"translate failed: {e}")
+    entry["segments"] = segs
+    _save(idx)
+    return {"ok": True, "translated": True, "segments": segs}
+
+
 @app.get("/api/check-existing")
 def api_check_existing(file_name: str = "") -> dict:
     """检查文件是否已经转写过。

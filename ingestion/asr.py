@@ -151,7 +151,7 @@ def transcribe(
     model: str = "large-v3-turbo",
     language: str = "zh",
     timeout: int = 1800,
-    translate: bool = True,
+    translate: bool = False,
 ) -> dict:
     """转写音频: Dell 3090 唯一解码 + ffprobe 真实时长 + 三级切分。"""
     if not os.path.isfile(audio_path):
