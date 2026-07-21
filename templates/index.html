@@ -40,6 +40,20 @@
   }
   .bar button:disabled{opacity:.5;cursor:not-allowed}
   .bar input:disabled{opacity:.4}
+  .bar .btn-stop{
+    background:var(--danger);color:#fff;border:none;
+    font-weight:700;padding:0 20px;border-radius:10px;cursor:pointer;font-size:14px;transition:.15s;
+  }
+  .bar .btn-stop:disabled{opacity:.4;cursor:not-allowed}
+  .bar .skip-label{
+    display:flex;align-items:center;gap:5px;color:var(--sub);font-size:12px;white-space:nowrap;cursor:pointer;
+  }
+  .bar .skip-label input[type=checkbox]{accent-color:var(--accent2);width:14px;height:14px;cursor:pointer}
+  .existing-badge{
+    display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;
+    background:rgba(52,211,153,.15);color:var(--accent2);border:1px solid rgba(52,211,153,.3);
+  }
+  .existing-badge.warn{background:rgba(248,113,113,.15);color:var(--danger);border-color:rgba(248,113,113,.3)}
   /* 离线模式切换栏 */
   .offline-bar{
     display:flex;align-items:center;gap:10px;flex-shrink:0;
@@ -141,6 +155,10 @@
     <input id="urlInput" type="url" placeholder="粘贴视频链接（抖音 / 小红书 / B站 / YouTube…）" autofocus
       onkeydown="if(event.key==='Enter') startIngest()" />
     <button id="goBtn" onclick="startIngest()">提取文案</button>
+    <button id="stopBtn" class="btn-stop" style="display:none" onclick="stopIngest()">⏹ 停止</button>
+    <label class="skip-label" title="已有转写结果的文件直接跳过 ASR">
+      <input type="checkbox" id="skipExisting" checked /> ⏳ 跳过已转写
+    </label>
   </div>
 
 
@@ -151,6 +169,7 @@
       <option value="">— 选择已有音频文件 —</option>
     </select>
     <span class="hint" id="offlineHint">跳过下载，直接用已有文件测试</span>
+    <span id="existingBadge"></span>
   </div>
 
 
@@ -199,7 +218,32 @@ function formatTime(sec){
 async function startIngest(){
   const url = $("urlInput").value.trim();
   if(!url) return;
+  // 跳过已转写检查
+  const skip = $("skipExisting").checked;
+  const file = $("fileSelect").value;
+  if(skip && file && $("offlineToggle").checked){
+    try {
+      const r = await fetch("/api/check-existing?file_name=" + encodeURIComponent(file));
+      const d = await r.json();
+      if(d.transcribed && d.entry && d.entry.segments && d.entry.segments.length > 0){
+        $("goBtn").disabled = false;
+        lastText = d.entry.segments.map(s => s.text).join(" ");
+        lastSegments = d.entry.segments;
+        lastMediaType = d.entry.media_type || "audio";
+        const fu = d.entry.file_url || "/files/" + encodeURIComponent(file);
+        renderResult({
+          text: lastText, segments: lastSegments, file_url: fu,
+          media_type: lastMediaType, embed_url: null, title: d.entry.title || file,
+          duration: d.entry.duration || 0, language: d.entry.language || "?",
+          source: "index", channel: "skip"
+        });
+        setStatus("\u2705 已有转写，跳过 ASR", "ok");
+        return;
+      }
+    } catch(e) { /* 检查失败，继续正常流程 */ }
+  }
   $("goBtn").disabled = true;
+  $("stopBtn").style.display = "";
   $("stage").innerHTML = '<div class="placeholder"><div class="big">\u23f3</div>正在处理，请稍候</div>';
   $("text").innerHTML = "";
   $("right-meta").textContent = "";
@@ -226,7 +270,8 @@ async function startIngest(){
     });
     const t = await r1.json();
     if(!r1.ok){ setStatus("失败：" + (t.detail||"未知错误"), "err"); $("goBtn").disabled = false; return; }
-    const taskId = t.task_id;
+    lastTaskId = t.task_id;
+    var taskId = t.task_id;
     setStatus("下载中…", "run");
 
     pollTimer = setInterval(async () => {
@@ -238,11 +283,18 @@ async function startIngest(){
 
         if(s === "downloading") setStatus("\u23eb 下载中…", "run");
         else if(s === "transcribing") setStatus("\ud83c\udf99 语音转写中… (可能需要几分钟)", "run");
-        else if(s === "error"){ setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; }
+        else if(s === "error"){ setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
         else if(s === "done"){
           clearInterval(pollTimer);
           renderResult(res, url);
           $("goBtn").disabled = false;
+          $("stopBtn").style.display = "none";
+        }
+        else if(s === "cancelled"){
+          clearInterval(pollTimer);
+          $("goBtn").disabled = false;
+          $("stopBtn").style.display = "none";
+          setStatus("\u26a0\ufe0f 已停止", "warn");
         }
       }catch(e){ /* retry */ }
     }, 2000);
@@ -250,6 +302,7 @@ async function startIngest(){
   }catch(e){
     setStatus("请求出错：" + e.message, "err");
     $("goBtn").disabled = false;
+    $("stopBtn").style.display = "none";
   }
 }
 
@@ -296,6 +349,16 @@ function renderResult(d, url){
     }
     $("right-meta").textContent = `字幕 ${d.source==="manual"?"手动":"自动"} · ${d.language||"?"}`;
     setStatus("\u2705 字幕直取成功", "ok");
+    } else if(d.channel === "skip"){
+    if(lastSegments && lastSegments.length > 0){
+      renderSegments(lastSegments);
+    } else {
+      $("text").innerHTML = `<div class="text-plain">${escHtml(lastText)}</div>`;
+    }
+    $("right-meta").textContent = "已有转写";
+    if(d.duration) $("right-meta").textContent += " · " + formatTime(d.duration);
+    if(d.language) $("right-meta").textContent += " · " + d.language;
+    setStatus("\u2705 已有转写，跳过 ASR", "ok");
   } else if(d.channel === "download_audio"){
     $("text").innerHTML = '<div class="placeholder"><div class="big">\u23f3</div>音频已下载，正在后台转写…</div>';
     $("right-meta").textContent = "\u23f3 等待转写";
@@ -385,6 +448,34 @@ function download(content, name, type){
 }
 function setStatus(msg, cls){ const s=$("status"); s.textContent=msg; s.className="status "+(cls||""); }
 
+// ---- 停止按钮 ----
+function stopIngest(){
+  if(!lastTaskId) return;
+  $("stopBtn").disabled = true;
+  fetch("/api/stop/" + lastTaskId, {method:"POST"}).then(r => r.json()).then(d => {
+    setStatus("⏹ 正在停止…", "run");
+  }).catch(() => {
+    setStatus("✖ 停止失败", "err");
+    $("stopBtn").disabled = false;
+  });
+}
+
+// ---- 已转写检查 ----
+async function checkExistingTranscript(fileName){
+  const badge = $("existingBadge");
+  if(!fileName){ badge.textContent=""; return; }
+  try{
+    const r = await fetch("/api/check-existing?file_name=" + encodeURIComponent(fileName));
+    const data = await r.json();
+    if(data.transcribed){
+      const dur = data.entry.duration ? Math.round(data.entry.duration) + "s" : "";
+      badge.innerHTML = "<span class='existing-badge'>✅ 已转写 " + dur + "</span>";
+    } else {
+      badge.innerHTML = "<span class='existing-badge warn'>✖ 未转写</span>";
+    }
+  }catch(e){ badge.textContent=""; }
+}
+
 // ---- 离线模式 ----
 async function toggleOffline(){
   const on = $("offlineToggle").checked;
@@ -419,6 +510,9 @@ function onFileSelect(){
   if(file){
     $("urlInput").value = "📁 " + file;
     $("offlineHint").textContent = `已选择: ${file}，点击「提取文案」开始离线转写`;
+    if($("skipExisting").checked) checkExistingTranscript(file);
+  } else {
+    $("existingBadge").textContent = "";
   }
 }
 
@@ -435,6 +529,15 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
   }).catch(() => {});
+  // 跳过已转写切换时重新检查
+  $("skipExisting").addEventListener("change", () => {
+    if($("skipExisting").checked){
+      const file = $("fileSelect").value;
+      if(file) checkExistingTranscript(file);
+    } else {
+      $("existingBadge").textContent = "";
+    }
+  });
 });
 </script>
 </body>

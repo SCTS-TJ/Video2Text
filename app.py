@@ -1,13 +1,16 @@
-"""Video2Text Web 服务 (阶段一: 采集 + 预览)。
+"""Video2Text Web 服务 (阶段一: 采集 + 预览 + 停止 + 跳过已转写)。
 
 FastAPI 提供:
   GET  /                  -> 精美单页界面
   POST /api/ingest        -> 采集链接, 异步返回文字/视频信息
   GET  /api/task/{id}     -> 轮询任务进度 (ASR 在后台跑)
   GET  /files/{name}      -> 流式返回已下载的媒体文件 (支持 Range 分块)
+  POST /api/stop/{task_id} -> 停止正在运行的任务
+  GET  /api/check-existing  -> 检查文件是否已转写过
 
 前端零构建: 内联 HTML/CSS/JS, 左右分栏结构。
 """
+import json
 import mimetypes
 import os
 import re
@@ -22,7 +25,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from pydantic import BaseModel
 
 from ingestion import ingest
-from ingestion.index import add_entry
+from ingestion.index import add_entry, get_entry
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
@@ -30,6 +33,35 @@ TRANSCRIPT_DIR = os.path.join(BASE_DIR, "transcripts")
 TEMPLATE = os.path.join(BASE_DIR, "templates", "index.html")
 
 os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
+
+# ---- 停止标志 (用于取消正在运行的任务) ----
+_stop_flags: dict[str, threading.Event] = {}
+_stop_flags_lock = threading.Lock()
+
+
+def _is_already_transcribed(file_name: str) -> dict | None:
+    """检查文件名是否已经在转写索引中。
+    返回索引记录或 None。
+    """
+    # 用文件名查 index.json
+    entry = get_entry(file_name)
+    if entry and entry.get("segments"):
+        return entry
+    # 也检查去掉后缀的情况 (mp4 -> mp3)
+    base, _ = os.path.splitext(file_name)
+    for alt_ext in (".mp3", ".m4a", ".wav", ".opus", ".ogg"):
+        alt_name = base + alt_ext
+        entry = get_entry(alt_name)
+        if entry and entry.get("segments"):
+            return entry
+    # 检查反向: .mp3 -> .mp4
+    if file_name.endswith(".mp3"):
+        for video_ext in (".mp4", ".webm", ".mkv", ".mov"):
+            alt_name = base + video_ext
+            entry = get_entry(alt_name)
+            if entry and entry.get("segments"):
+                return entry
+    return None
 
 
 def _index_entry(result: dict) -> None:
@@ -107,7 +139,7 @@ app = FastAPI(title="Video2Text")
 
 # ---- 异步任务管理 ----
 
-tasks: dict = {}  # task_id -> {"status": "downloading"|"transcribing"|"done"|"error", "result": {}, "error": str|None}
+tasks: dict = {}  # task_id -> {"status": "downloading"|"transcribing"|"done"|"error"|"cancelled", "result": {}, "error": str|None}
 tasks_lock = threading.Lock()
 
 
@@ -148,20 +180,26 @@ def _build_payload(result: dict, url: str) -> dict:
     elif result.get("path"):
         name = os.path.basename(result["path"])
         payload["file_url"] = f"/files/{name}"
-    else:
-        payload["file_url"] = ""
 
-    # 判断是否有可预览的媒体文件
-    payload["has_media"] = bool(result.get("video_path") or result.get("path"))
-    # 标记是视频还是音频
-    if result.get("video_path"):
-        payload["media_type"] = "video"
-    elif result.get("mode") == "audio":
-        payload["media_type"] = "audio"
+    if payload.get("file_url"):
+        ext = os.path.splitext(payload["file_url"])[1].lower()
+        payload["media_type"] = "video" if ext in (".mp4", ".webm", ".mkv", ".mov") else "audio"
     else:
         payload["media_type"] = ""
 
     return payload
+
+
+def _check_cancelled(task_id: str) -> bool:
+    """检查任务是否被取消, 取消时更新状态并返回 True"""
+    with _stop_flags_lock:
+        ev = _stop_flags.get(task_id)
+        if ev and ev.is_set():
+            with tasks_lock:
+                tasks[task_id]["status"] = "cancelled"
+                tasks[task_id]["error"] = "用户手动停止"
+            return True
+    return False
 
 
 def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
@@ -176,6 +214,10 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 with tasks_lock:
                     tasks[task_id]["status"] = "error"
                     tasks[task_id]["error"] = f"local file not found: {local_file}"
+                return
+
+            # 检查是否被取消
+            if _check_cancelled(task_id):
                 return
 
             # 如果是视频文件, 提取音频给 ASR, 视频用于预览
@@ -197,8 +239,16 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                     if not os.path.isfile(audio_path):
                         audio_path = file_path  # 回退: 直接用视频文件
 
+            # 再次检查取消
+            if _check_cancelled(task_id):
+                return
+
             from ingestion.asr import transcribe
             asr_result = transcribe(audio_path, language="zh")
+            # 检查取消 (ASR 完成后但还未落盘时)
+            if _check_cancelled(task_id):
+                return
+
             result = {
                 "channel": "asr",
                 "ok": asr_result["ok"],
@@ -221,9 +271,14 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 _save_transcript(result, url)
                 _index_entry(result)
             return
+
         # 阶段1: 采集 (下载 或 字幕直取)
         with tasks_lock:
             tasks[task_id]["status"] = "downloading"
+
+        if _check_cancelled(task_id):
+            return
+
         result = ingest(url, transcribe=False)  # 先不转录, 只下载
 
         if not result["ok"]:
@@ -231,6 +286,9 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["status"] = "error"
                 tasks[task_id]["error"] = result.get("error", "ingest failed")
                 tasks[task_id]["result"] = _build_payload(result, url)
+            return
+
+        if _check_cancelled(task_id):
             return
 
         # 字幕直取通道: 直接完成
@@ -247,9 +305,16 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             tasks[task_id]["status"] = "transcribing"
             tasks[task_id]["result"] = _build_payload(result, url)
 
+        if _check_cancelled(task_id):
+            return
+
         # 阶段2: ASR 转写
         from ingestion.asr import transcribe
         asr_result = transcribe(result["path"], language="zh")
+
+        if _check_cancelled(task_id):
+            return
+
         if asr_result["ok"]:
             result["channel"] = "asr"
             result["text"] = asr_result["text"]
@@ -281,12 +346,51 @@ def api_ingest(req: IngestReq) -> dict:
     """提交采集任务, 立即返回 task_id, 后台执行"""
     task_id = uuid.uuid4().hex[:12]
     with tasks_lock:
-        tasks[task_id] = {"status": "downloading", "result": {}, "error": None}
+        tasks[task_id] = {"status": "queued", "result": {}, "error": None}
+
+    # 初始化停止标志
+    with _stop_flags_lock:
+        _stop_flags[task_id] = threading.Event()
 
     t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url), kwargs={"local_file": req.local_file}, daemon=True)
     t.start()
 
-    return {"task_id": task_id, "status": "downloading"}
+    return {"task_id": task_id, "status": "queued"}
+
+
+@app.post("/api/stop/{task_id}")
+def api_stop(task_id: str) -> dict:
+    """停止正在运行的任务"""
+    with tasks_lock:
+        task = tasks.get(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="task not found")
+        if task["status"] in ("done", "error", "cancelled"):
+            return {"task_id": task_id, "status": task["status"], "message": "任务已结束, 无需停止"}
+
+    with _stop_flags_lock:
+        ev = _stop_flags.get(task_id)
+        if ev:
+            ev.set()  # 设置停止标志
+
+    with tasks_lock:
+        tasks[task_id]["status"] = "cancelling"
+
+    return {"task_id": task_id, "status": "cancelling", "message": "正在停止..."}
+
+
+@app.get("/api/check-existing")
+def api_check_existing(file_name: str = "") -> dict:
+    """检查文件是否已经转写过。
+    返回: {"transcribed": bool, "entry": dict|None}
+    """
+    if not file_name:
+        return {"transcribed": False, "entry": None}
+    entry = _is_already_transcribed(file_name)
+    return {
+        "transcribed": entry is not None,
+        "entry": entry,
+    }
 
 
 @app.get("/api/files")
@@ -327,6 +431,7 @@ def api_task(task_id: str) -> dict:
             "error": task["error"],
         }
 
+
 @app.get("/files/{name}")
 def serve_file(name: str, request: Request):
     """流式返回媒体文件, 支持 Range 分块 (让视频可拖动进度条)。"""
@@ -343,12 +448,11 @@ def serve_file(name: str, request: Request):
 
     range_header = request.headers.get("range")
     if range_header:
-        # 解析 Range: bytes=start-end
         match = re.match(r"bytes=(\d+)-(\d*)", range_header)
         if match:
             start = int(match.group(1))
             end_str = match.group(2)
-            end = int(end_str) if end_str else min(start + (1024 * 1024), file_size - 1)  # 默认 1MB 分块
+            end = int(end_str) if end_str else min(start + (1024 * 1024), file_size - 1)
             end = min(end, file_size - 1)
             chunk_size = end - start + 1
 
@@ -367,7 +471,4 @@ def serve_file(name: str, request: Request):
                 },
             )
 
-    # 无 Range: 返回完整文件
     return FileResponse(path, media_type=content_type)
-
-
