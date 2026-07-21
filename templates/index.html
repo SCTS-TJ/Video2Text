@@ -677,21 +677,43 @@ function onMediaTimeUpdate(){
     lastHighlightedWord = -1;  // 重置词索引
   }
 
-  // 逐词高亮: 估算当前行内已说出多少字符
+  // 逐词高亮: 优先用真实 word-level timestamp, 否则回退到估算
   if(found >= 0 && found < rows.length){
     const cur = rows[found];
-    const dur = cur.end - cur.start;
-    if(dur > 0 && cur.words.length > 0){
-      const progress = Math.max(0, Math.min(1, (t - cur.start) / dur));
-      const targetWord = Math.min(cur.words.length - 1, Math.floor(progress * cur.words.length));
-      if(targetWord !== lastHighlightedWord){
-        // 更新词状态
+    if(cur.words.length > 0){
+      // 检查是否有真实词时间戳
+      const firstW = cur.words[0];
+      const hasRealTS = firstW.dataset.wstart !== undefined && firstW.dataset.wstart !== "";
+      if(hasRealTS){
+        // 真实词级: 找到包含 t 的词
+        let targetWord = -1;
         for(let i = 0; i < cur.words.length; i++){
-          if(i < targetWord) cur.words[i].classList.add("spoken");
-          else if(i === targetWord) cur.words[i].classList.add("current");
-          else cur.words[i].classList.remove("spoken", "current");
+          const ws = parseFloat(cur.words[i].dataset.wstart);
+          if(t >= ws){ targetWord = i; } else { break; }
         }
-        lastHighlightedWord = targetWord;
+        if(targetWord !== lastHighlightedWord){
+          for(let i = 0; i < cur.words.length; i++){
+            if(i < targetWord) cur.words[i].classList.add("spoken");
+            else if(i === targetWord) cur.words[i].classList.add("current");
+            else cur.words[i].classList.remove("spoken", "current");
+          }
+          lastHighlightedWord = targetWord;
+        }
+      } else {
+        // 估算模式: 按进度推进
+        const dur = cur.end - cur.start;
+        if(dur > 0){
+          const progress = Math.max(0, Math.min(1, (t - cur.start) / dur));
+          const targetWord = Math.min(cur.words.length - 1, Math.floor(progress * cur.words.length));
+          if(targetWord !== lastHighlightedWord){
+            for(let i = 0; i < cur.words.length; i++){
+              if(i < targetWord) cur.words[i].classList.add("spoken");
+              else if(i === targetWord) cur.words[i].classList.add("current");
+              else cur.words[i].classList.remove("spoken", "current");
+            }
+            lastHighlightedWord = targetWord;
+          }
+        }
       }
     }
   }

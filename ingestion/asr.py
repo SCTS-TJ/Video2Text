@@ -175,8 +175,24 @@ def transcribe(
         # 用真实时长, 丢弃 Dell 的推理耗时
         dur = real_duration
 
-        # 三级切分估算时间戳
-        segments = _estimate_segments(text, dur)
+        # 优先使用 Dell 返回的真实 segments (含 word-level timestamps)
+        # 后退: 为兼容老服务端, 仍保留估算分支
+        dell_segments = dell.get("segments")
+        if dell_segments:
+            segments = []
+            for s in dell_segments:
+                seg_obj = {
+                    "start": float(s.get("start", 0)),
+                    "end": float(s.get("end", 0)),
+                    "text": (s.get("text", "") or "").strip(),
+                }
+                # 保留 word-level (子子孙项中能用)
+                if s.get("words"):
+                    seg_obj["words"] = s["words"]
+                segments.append(seg_obj)
+        else:
+            # 老服务端或错误时才走估算
+            segments = _estimate_segments(text, dur)
 
         return {
             "ok": True, "text": text, "segments": segments,
