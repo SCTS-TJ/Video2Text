@@ -147,6 +147,7 @@ class IngestReq(BaseModel):
     url: str
     force_download: bool = False
     local_file: str = ""  # 离线模式: 直接用已有文件, 跳过下载
+    language: str = "auto"  # "auto" / "en" / "zh" / "ja" ... Dell 识别用
 
 
 class RenameReq(BaseModel):
@@ -212,7 +213,7 @@ def _check_cancelled(task_id: str) -> bool:
     return False
 
 
-def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
+def _run_ingest_task(task_id: str, url: str, local_file: str = "", language: str = "auto"):
     """后台运行采集 + ASR, 完成后更新 tasks 字典"""
     try:
         if local_file:
@@ -254,7 +255,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 return
 
             from ingestion.asr import transcribe
-            asr_result = transcribe(audio_path, language="zh")
+            asr_result = transcribe(audio_path, language=language, translate=True)
             # 检查取消 (ASR 完成后但还未落盘时)
             if _check_cancelled(task_id):
                 return
@@ -320,7 +321,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
 
         # 阶段2: ASR 转写
         from ingestion.asr import transcribe
-        asr_result = transcribe(result["path"], language="zh")
+        asr_result = transcribe(result["path"], language=language, translate=True)
 
         if _check_cancelled(task_id):
             return
@@ -362,7 +363,7 @@ def api_ingest(req: IngestReq) -> dict:
     with _stop_flags_lock:
         _stop_flags[task_id] = threading.Event()
 
-    t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url), kwargs={"local_file": req.local_file}, daemon=True)
+    t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url), kwargs={"local_file": req.local_file, "language": req.language}, daemon=True)
     t.start()
 
     return {"task_id": task_id, "status": "queued"}
@@ -392,14 +393,17 @@ def api_stop(task_id: str) -> dict:
 @app.get("/api/check-existing")
 def api_check_existing(file_name: str = "") -> dict:
     """检查文件是否已经转写过。
-    返回: {"transcribed": bool, "entry": dict|None}
+    返回: {"transcribed": bool, "entry": dict|None, "translated": bool}
     """
     if not file_name:
-        return {"transcribed": False, "entry": None}
+        return {"transcribed": False, "entry": None, "translated": False}
     entry = _is_already_transcribed(file_name)
+    if not entry:
+        return {"transcribed": False, "entry": None, "translated": False}
     return {
-        "transcribed": entry is not None,
+        "transcribed": True,
         "entry": entry,
+        "translated": any(s.get("translation") for s in entry.get("segments", [])),
     }
 
 

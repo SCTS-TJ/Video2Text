@@ -13,6 +13,8 @@ import subprocess
 
 import requests
 
+from .translate import translate_segments, TRANSLATE_ENABLED
+
 ASR_URL = os.getenv("ASR_URL", "http://192.168.121.99:7860/transcribe")
 FFPROBE = "/opt/homebrew/bin/ffprobe"
 _NO_PROXY = {"http": None, "https": None}
@@ -149,6 +151,7 @@ def transcribe(
     model: str = "large-v3-turbo",
     language: str = "zh",
     timeout: int = 1800,
+    translate: bool = True,
 ) -> dict:
     """转写音频: Dell 3090 唯一解码 + ffprobe 真实时长 + 三级切分。"""
     if not os.path.isfile(audio_path):
@@ -194,9 +197,18 @@ def transcribe(
             # 老服务端或错误时才走估算
             segments = _estimate_segments(text, dur)
 
+        # 中英对照翻译: 英文视频翻中文, 中文视频不翻
+        if translate and segments and TRANSLATE_ENABLED and lang not in ("zh", "zh-CN"):
+            try:
+                segments = translate_segments(segments, target_lang="zh-CN")
+            except Exception as e:
+                print(f"[asr] translate failed: {e}")
+
         return {
             "ok": True, "text": text, "segments": segments,
-            "duration": dur, "language": lang, "error": None,
+            "duration": dur, "language": lang,
+            "translated": translate and lang not in ("zh", "zh-CN"),
+            "error": None,
         }
     except requests.Timeout:
         return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
