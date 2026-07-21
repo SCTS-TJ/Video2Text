@@ -557,28 +557,6 @@ function clearActiveHighlight(){
   lastHighlightedWord = -1;
 }
 
-), "*");
-      }catch(e){}
-    }, 200);
-    // 监听 YouTube 返回
-    if(!window._ytMessageBound){
-      window.addEventListener("message", (e) => {
-        try{
-          const d = JSON.parse(e.data);
-          if(typeof d === "object" && d.info && typeof d.info.currentTime === "number"){
-          }
-        }catch(err){}
-      });
-      window._ytMessageBound = true;
-    }
-    return;
-  }
-  // 普通 video/audio: timeupdate 事件
-  if(mediaEl && !_syncTimeupdateBound){
-    mediaEl.addEventListener("timeupdate", onMediaTimeUpdate);
-    _syncTimeupdateBound = true;
-  }
-}
 function onMediaTimeUpdate(){
   if(!window._segRows || !window._segRows.length) return;
   // YouTube 模式: 从 _ytCurrentTime 读
