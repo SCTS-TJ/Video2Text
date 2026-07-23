@@ -426,7 +426,7 @@ function renderResult(d, url){
     const tag = isVideo ? "video" : "audio";
     stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
     mediaEl = document.getElementById("mediaPlayer");
-    $("left-meta").textContent = isVideo ? "\U0001f3ac 视频预览" : "\U0001f3b5 预览";
+    $("left-meta").textContent = isVideo ? "🎬 视频预览" : "🎵 预览";
     setSourceUrl(d.source_url);
     // 绑定同步事件
     if(window._segRows && window._segRows.length){
