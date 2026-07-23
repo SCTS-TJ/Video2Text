@@ -328,7 +328,7 @@ async function startIngest(){
         const fu = "/files/" + encodeURIComponent(file);
         renderResult({
           text: lastText, segments: lastSegments, file_url: fu,
-          media_type: lastMediaType, embed_url: null, title: d.entry.title || file,
+          media_type: d.entry.media_type || lastMediaType, embed_url: null, title: d.entry.title || file,
           duration: d.entry.duration || 0, language: d.entry.language || "?",
           source: "index", channel: "skip", source_url: d.entry.source_url || ""
         });
