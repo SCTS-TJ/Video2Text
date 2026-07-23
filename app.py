@@ -215,6 +215,7 @@ def _build_payload(result: dict, url: str) -> dict:
             except Exception:
                 pass  # 探测失败则沿用扩展名判断
         payload["media_type"] = guessed
+        result["media_type"] = guessed  # 同步回 result, 供 _index_entry 保存
     else:
         payload["media_type"] = ""
 
@@ -445,22 +446,23 @@ def api_check_existing(file_name: str = "") -> dict:
     entry = _is_already_transcribed(file_name)
     transcribed = entry is not None
     logger.debug("检查已转写 file_name=%s transcribed=%s", file_name, transcribed)
-    # 探测 media_type 是否精确
-    if entry and entry.get("media_type") == "video" and entry.get("file_url"):
-        fname = os.path.basename(entry["file_url"])
-        local_path = os.path.join(DOWNLOAD_DIR, fname)
-        if os.path.isfile(local_path):
-            try:
-                r = subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-print_format", "json",
-                     "-show_streams", local_path],
-                    capture_output=True, text=True, timeout=10)
-                info = json.loads(r.stdout)
-                has_video = any(s.get("codec_type") == "video" for s in info.get("streams", []))
-                if not has_video:
-                    entry["media_type"] = "audio"
-            except Exception:
-                pass
+    # 探测 media_type: 有视频扩展名的文件都验证真伪
+    if entry and entry.get("file_url"):
+        ext = os.path.splitext(entry["file_url"])[1].lower()
+        if ext in (".mp4", ".webm", ".mkv", ".mov"):
+            fname = os.path.basename(entry["file_url"])
+            local_path = os.path.join(DOWNLOAD_DIR, fname)
+            if os.path.isfile(local_path):
+                try:
+                    r = subprocess.run(
+                        ["ffprobe", "-v", "quiet", "-print_format", "json",
+                         "-show_streams", local_path],
+                        capture_output=True, text=True, timeout=10)
+                    info = json.loads(r.stdout)
+                    has_video = any(s.get("codec_type") == "video" for s in info.get("streams", []))
+                    entry["media_type"] = "video" if has_video else "audio"
+                except Exception:
+                    pass
     return {
         "transcribed": transcribed,
         "entry": entry,
