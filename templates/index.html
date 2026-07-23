@@ -116,13 +116,7 @@
     padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--sub);flex-shrink:0;
   }
   .col .head b{color:var(--txt);font-weight:600}
-  .source-url{
-    flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    font-size:11px;color:var(--sub);margin-left:8px;
-  }
-  .source-url a{color:var(--accent);text-decoration:none}
-  .source-url a:hover{text-decoration:underline}
-  .stage{
+.stage{
     flex:1;display:flex;align-items:center;justify-content:center;
     padding:10px;background:#0a0e18;min-height:0;overflow:hidden;
   }
@@ -273,7 +267,7 @@
 
   <div class="row">
     <div class="col">
-      <div class="head"><b>📺 预览</b><span id="left-meta" class="pill">等待输入</span><span class="source-url" id="sourceUrl"></span></div>
+      <div class="head"><b>📺 预览</b><span id="left-meta" class="pill">等待输入</span></div>
       <div class="stage" id="stage">
         <div class="placeholder"><div class="big">🎬</div>在上方粘贴视频链接<br />点击「提取文案」开始</div>
       </div>
@@ -540,14 +534,13 @@ function renderSegments(segments){
 
 // ---- 显示源链接 ----
 function setSourceUrl(url){
-  const el = $("sourceUrl");
+  const el = $("left-meta");
   if(!el) return;
   if(url && url.startsWith("http")){
     const short = url.replace(/^https?:\/\//, "").replace(/\/.*/, "");
     el.innerHTML = "🔗 <a href=\"" + escHtml(url) + "\" target=\"_blank\" title=\"" + escHtml(url) + "\">" + escHtml(short) + "</a>";
-  } else {
-    el.textContent = "";
   }
+  // 没有 URL 时不覆盖 left-meta (保留 renderResult 设置的文本)
 }
 
 // ==== 字幕同步高亮核心 ====
