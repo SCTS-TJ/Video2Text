@@ -67,7 +67,7 @@ def _is_already_transcribed(file_name: str) -> dict | None:
     return None
 
 
-def _index_entry(result: dict) -> None:
+def _index_entry(result: dict, url: str = "") -> None:
     """将转写结果写入 transcripts/index.json 持久索引"""
     text = result.get("text", "")
     if not text:
@@ -98,6 +98,7 @@ def _index_entry(result: dict) -> None:
         file_url=file_url,
         media_type=media_type,
         language=lang,
+        source_url=url,
     )
 
 
@@ -200,6 +201,7 @@ def _build_payload(result: dict, url: str) -> dict:
     else:
         payload["media_type"] = ""
 
+    payload["source_url"] = url
     return payload
 
 
@@ -289,7 +291,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["result"] = _build_payload(result, url)
                 tasks[task_id]["error"] = result["error"]
                 _save_transcript(result, url)
-                _index_entry(result)
+                _index_entry(result, url)
             return
 
         # 阶段1: 采集 (下载 或 字幕直取)
@@ -320,7 +322,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["status"] = "done"
                 tasks[task_id]["result"] = _build_payload(result, url)
                 _save_transcript(result, url)
-                _index_entry(result)
+                _index_entry(result, url)
             return
 
         # 下载通道: 需要 ASR
@@ -359,7 +361,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             tasks[task_id]["status"] = "done"
             tasks[task_id]["result"] = _build_payload(result, url)
             _save_transcript(result, url)
-            _index_entry(result)
+            _index_entry(result, url)
 
     except Exception as e:
         logger.error("任务异常 task_id=%s error=%s", task_id, e, exc_info=True)

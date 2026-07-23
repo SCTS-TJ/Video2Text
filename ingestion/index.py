@@ -27,6 +27,7 @@ def add_entry(
     media_type: str,
     language: str = "?",
     transcript_md: str = "",
+    source_url: str = "",
 ) -> None:
     """写入/更新一条索引记录"""
     idx = _load()
@@ -38,6 +39,7 @@ def add_entry(
         "media_type": media_type,
         "language": language,
         "transcript_md": transcript_md,
+        "source_url": source_url,
         "transcribed_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     _save(idx)
