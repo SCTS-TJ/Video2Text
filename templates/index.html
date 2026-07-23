@@ -540,7 +540,8 @@ function setSourceUrl(url){
   if(!el) return;
   if(url && url.startsWith("http")){
     el.title = url;
-    el.innerHTML = "🔗 <a href=\"" + escHtml(url) + "\" target=\"_blank\" title=\"" + escHtml(url) + "\" style=\"color:inherit;text-decoration:none\">" + escHtml(url) + "</a>";
+    var displayUrl = url.length > 65 ? url.slice(0,62) + "..." : url;
+    el.innerHTML = "🔗 <a href=\"" + escHtml(url) + "\" target=\"_blank\" title=\"" + escHtml(url) + "\" style=\"color:inherit;text-decoration:none\">" + escHtml(displayUrl) + "</a>";
   }
 }
 
