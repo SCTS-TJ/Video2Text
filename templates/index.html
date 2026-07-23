@@ -21,7 +21,7 @@
   .logo{
     width:40px;height:40px;border-radius:11px;
     background:linear-gradient(135deg,var(--accent),var(--accent2));
-    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#0b0f1a;
+    display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;color:#0b0f1a;cursor:pointer;
   }
   h1{font-size:20px;letter-spacing:.5px}
   h1 small{display:block;font-size:11px;color:var(--sub);font-weight:400;margin-top:2px}
@@ -30,12 +30,12 @@
     border-radius:var(--radius);padding:10px 12px;margin-bottom:14px;flex-shrink:0;
   }
   .bar input{
-    flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    flex:0 1 180px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
     border-radius:10px;padding:10px 14px;font-size:14px;outline:none;transition:.2s;
   }
   .bar input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(108,140,255,.15)}
   .bar button{
-    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;border:none;
+    background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;cursor:pointer;border:none;
     font-weight:700;padding:0 20px;border-radius:10px;cursor:pointer;font-size:14px;transition:.15s;
   }
   .bar button:disabled{opacity:.5;cursor:not-allowed}
@@ -93,13 +93,17 @@
   .modal-actions .btn-confirm:hover{opacity:.85}
   .modal-actions .btn-confirm:disabled{opacity:.4;cursor:not-allowed}
   .offline-bar select{
-    flex:1;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    flex:0 1 180px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
     border-radius:8px;padding:6px 10px;font-size:12px;outline:none;cursor:pointer;
     max-width:360px;
   }
   .offline-bar select:focus{border-color:var(--accent)}
   .offline-bar select:disabled{opacity:.4;cursor:not-allowed}
   .offline-bar .hint{font-size:11px;color:var(--sub);white-space:nowrap}
+  .offline-bar .selected-file{
+    flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    font-size:12px;color:var(--txt);padding:0 4px;
+  }
 
 
   .row{display:flex;gap:16px;flex:1;min-height:0}
@@ -171,7 +175,7 @@
   }
   .seg-row.active .seg-text .w.current{
     background:var(--accent);
-    color:#0b0f1a;
+    color:#0b0f1a;cursor:pointer;
     font-weight:700;
   }
   /* 对齐偏移控制条 */
@@ -210,7 +214,7 @@
     padding:6px 12px;font-size:12px;cursor:pointer;transition:.15s;
   }
   .tools button:hover{border-color:var(--accent)}
-  .tools button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;border:none;font-weight:600}
+  .tools button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;cursor:pointer;border:none;font-weight:600}
   .tools button.soon{opacity:.5;cursor:not-allowed}
   .status{
     padding:8px 14px;font-size:12px;border-top:1px solid var(--line);flex-shrink:0;
@@ -232,7 +236,7 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="logo">V2</div>
+    <a href="/" style="text-decoration:none"><div class="logo">V2</div></a>
     <h1>Video2Text <small>社媒视频一键转文案</small></h1>
   </header>
 
@@ -255,6 +259,7 @@
     </select>
     <button id="renameBtn" class="rename-btn" disabled onclick="showRenameModal()" title="重命名文件">✏️</button>
     <button id="deleteBtn" class="delete-btn" disabled onclick="showDeleteModal()" title="删除文件">🗑️</button>
+    <span class="selected-file" id="selectedFile"></span>
     <span class="hint" id="offlineHint">跳过下载，直接用已有文件测试</span>
     <span id="existingBadge"></span>
   </div>
@@ -288,8 +293,6 @@
         <button class="primary" id="copy">📋 复制</button>
         <button id="exp-txt">📄 导出 TXT</button>
         <button id="exp-md">📝 导出 MD</button>
-        <button class="soon" id="polish">✨ 一键润色</button>
-        <button class="soon" id="quote">💎 金句提炼</button>
       </div>
       <div class="status" id="status">就绪</div>
     </div>
@@ -814,8 +817,6 @@ $("exp-md").onclick = () => {
   download(content, "transcript.md", "text/markdown");
 };
 
-$("polish").onclick = () => setStatus("「一键润色」将在接入 LLM 后启用", "run");
-$("quote").onclick  = () => setStatus("「金句提炼」将在接入 LLM 后启用", "run");
 
 function download(content, name, type){
   const blob = new Blob([content], {type});
@@ -859,6 +860,7 @@ async function toggleOffline(){
   $("fileSelect").disabled = !on;
   $("urlInput").disabled = on;
   $("offlineHint").textContent = on ? "选择已有文件直接 ASR 转写，无需下载" : "跳过下载，直接用已有文件测试";
+  if(!on) $("selectedFile").textContent = "";
   if(on){
     loadFileList2();
   } else {
@@ -871,11 +873,12 @@ function onFileSelect(){
   const file = $("fileSelect").value;
   if(file){
     $("urlInput").value = file;
-    $("offlineHint").textContent = "已选择: " + file + "，点击「提取文案」开始离线转写";
+    $("selectedFile").textContent = file;
     $("renameBtn").disabled = false;
     $("deleteBtn").disabled = false;
     if($("skipExisting").checked) checkExistingTranscript(file);
   } else {
+    $("selectedFile").textContent = "";
     $("existingBadge").textContent = "";
     $("renameBtn").disabled = true;
     $("deleteBtn").disabled = true;
