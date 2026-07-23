@@ -418,6 +418,7 @@ function renderResult(d, url){
   if(d.embed_url){
     stage.innerHTML = `<iframe id="ytFrame" src="${d.embed_url}" frameborder="0" allowfullscreen></iframe>`;
     $("left-meta").textContent = "\u25b6 YouTube";
+    setSourceUrl(d.source_url || url);
     const iframe = document.getElementById("ytFrame");
     iframe.onload = () => { try{ ytPlayer = iframe.contentWindow; }catch(e){} };
   } else if(d.file_url && d.has_media !== false){
