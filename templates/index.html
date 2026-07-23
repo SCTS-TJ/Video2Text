@@ -112,7 +112,7 @@
     display:flex;flex-direction:column;min-height:0;max-height:100%;
   }
   .col .head{
-    display:flex;align-items:center;justify-content:space-between;
+    display:flex;align-items:center;justify-content:space-between;min-width:0;
     padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--sub);flex-shrink:0;
   }
   .col .head b{color:var(--txt);font-weight:600}
@@ -223,7 +223,7 @@
   .pill{
     display:inline-block;background:var(--panel2);border:1px solid var(--line);
     border-radius:99px;padding:2px 8px;font-size:11px;color:var(--sub);
-    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    max-width:100%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
   .textwrap::-webkit-scrollbar{width:5px}
   .textwrap::-webkit-scrollbar-track{background:transparent}
