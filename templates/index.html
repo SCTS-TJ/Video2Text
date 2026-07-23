@@ -539,7 +539,7 @@ function setSourceUrl(url){
   if(!el) return;
   if(url && url.startsWith("http")){
     el.title = url;
-    el.innerHTML = "🔗 <a href=\"" + escHtml(url) + "\" target=\"_blank\" title=\"" + escHtml(url) + "\" style=\"color:inherit;text-decoration:none;"\">" + escHtml(url) + "</a>";
+    el.innerHTML = "🔗 <a href=\"" + escHtml(url) + "\" target=\"_blank\" title=\"" + escHtml(url) + "\" style=\"color:inherit;text-decoration:none\">" + escHtml(url) + "</a>";
   }
 }
 
