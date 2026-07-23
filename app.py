@@ -26,6 +26,9 @@ from pydantic import BaseModel
 
 from ingestion import ingest
 from ingestion.index import add_entry, get_entry
+from ingestion.logger import get_logger
+
+logger = get_logger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
@@ -215,12 +218,15 @@ def _check_cancelled(task_id: str) -> bool:
 def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
     """后台运行采集 + ASR, 完成后更新 tasks 字典"""
     try:
+        logger.info("任务开始 task_id=%s url=%s local_file=%s", task_id, url, local_file)
         if local_file:
             # ===== 离线模式: 跳过下载, 直接用已有文件 =====
+            logger.info("离线模式 task_id=%s local_file=%s", task_id, local_file)
             with tasks_lock:
                 tasks[task_id]["status"] = "transcribing"
             file_path = os.path.join(DOWNLOAD_DIR, local_file)
             if not os.path.isfile(file_path):
+                logger.warning("本地文件不存在 task_id=%s path=%s", task_id, file_path)
                 with tasks_lock:
                     tasks[task_id]["status"] = "error"
                     tasks[task_id]["error"] = f"local file not found: {local_file}"
@@ -259,6 +265,10 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             if _check_cancelled(task_id):
                 return
 
+            logger.info("离线ASR完成 task_id=%s ok=%s text_len=%d segments=%d",
+                        task_id, asr_result["ok"], len(asr_result.get("text", "")),
+                        len(asr_result.get("segments", [])))
+
             result = {
                 "channel": "asr",
                 "ok": asr_result["ok"],
@@ -283,6 +293,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             return
 
         # 阶段1: 采集 (下载 或 字幕直取)
+        logger.info("开始下载 task_id=%s url=%s", task_id, url)
         with tasks_lock:
             tasks[task_id]["status"] = "downloading"
 
@@ -292,6 +303,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         result = ingest(url, transcribe=False)  # 先不转录, 只下载
 
         if not result["ok"]:
+            logger.warning("下载失败 task_id=%s error=%s", task_id, result.get("error"))
             with tasks_lock:
                 tasks[task_id]["status"] = "error"
                 tasks[task_id]["error"] = result.get("error", "ingest failed")
@@ -303,6 +315,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
 
         # 字幕直取通道: 直接完成
         if result["channel"] == "transcript":
+            logger.info("字幕直取完成 task_id=%s text_len=%d", task_id, len(result.get("text", "")))
             with tasks_lock:
                 tasks[task_id]["status"] = "done"
                 tasks[task_id]["result"] = _build_payload(result, url)
@@ -311,6 +324,8 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             return
 
         # 下载通道: 需要 ASR
+        logger.info("下载完成 task_id=%s channel=%s path=%s video_path=%s",
+                    task_id, result["channel"], result.get("path"), result.get("video_path"))
         with tasks_lock:
             tasks[task_id]["status"] = "transcribing"
             tasks[task_id]["result"] = _build_payload(result, url)
@@ -319,6 +334,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             return
 
         # 阶段2: ASR 转写
+        logger.info("开始ASR转写 task_id=%s audio_path=%s", task_id, result.get("path"))
         from ingestion.asr import transcribe
         asr_result = transcribe(result["path"], language="zh")
 
@@ -332,6 +348,12 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             result["duration"] = asr_result.get("duration", 0)
             result["source"] = "whisper"
             result["language"] = "zh"
+            logger.info("ASR转写完成 task_id=%s text_len=%d segments=%d duration=%.1fs",
+                        task_id, len(asr_result.get("text", "")),
+                        len(asr_result.get("segments", [])),
+                        asr_result.get("duration", 0))
+        else:
+            logger.warning("ASR转写失败 task_id=%s error=%s", task_id, asr_result.get("error"))
 
         with tasks_lock:
             tasks[task_id]["status"] = "done"
@@ -340,6 +362,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             _index_entry(result)
 
     except Exception as e:
+        logger.error("任务异常 task_id=%s error=%s", task_id, e, exc_info=True)
         with tasks_lock:
             tasks[task_id]["status"] = "error"
             tasks[task_id]["error"] = f"{type(e).__name__}: {e}"
@@ -362,6 +385,9 @@ def api_ingest(req: IngestReq) -> dict:
     with _stop_flags_lock:
         _stop_flags[task_id] = threading.Event()
 
+    source_desc = f"local_file={req.local_file}" if req.local_file else f"url={req.url}"
+    logger.info("任务入队 task_id=%s %s force_download=%s", task_id, source_desc, req.force_download)
+
     t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url), kwargs={"local_file": req.local_file}, daemon=True)
     t.start()
 
@@ -382,6 +408,7 @@ def api_stop(task_id: str) -> dict:
         ev = _stop_flags.get(task_id)
         if ev:
             ev.set()  # 设置停止标志
+            logger.info("任务停止 signal task_id=%s", task_id)
 
     with tasks_lock:
         tasks[task_id]["status"] = "cancelling"
@@ -397,8 +424,10 @@ def api_check_existing(file_name: str = "") -> dict:
     if not file_name:
         return {"transcribed": False, "entry": None}
     entry = _is_already_transcribed(file_name)
+    transcribed = entry is not None
+    logger.debug("检查已转写 file_name=%s transcribed=%s", file_name, transcribed)
     return {
-        "transcribed": entry is not None,
+        "transcribed": transcribed,
         "entry": entry,
     }
 
@@ -457,6 +486,8 @@ def api_rename(req: RenameReq) -> list[dict]:
                 os.rename(pair_old_path, pair_new_path)
                 renamed.append((pair_old, pair_new))
     
+    logger.info("文件重命名 %s -> %s 配对=%s", old, new, renamed[1:] if len(renamed) > 1 else "无")
+    
     # 3. 更新 index.json: 将旧 key 迁移到新 key
     from ingestion.index import _load, _save, remove_entry
     idx = _load()
@@ -496,7 +527,9 @@ def api_delete(req: DeleteReq) -> list[dict]:
     try:
         os.remove(path)
         deleted.append(name)
+        logger.info("文件删除 name=%s path=%s", name, path)
     except Exception as e:
+        logger.warning("文件删除失败 name=%s error=%s", name, e)
         raise HTTPException(status_code=500, detail=f"delete failed: {e}")
 
     # 同时删除配对文件 (mp4 <-> mp3)

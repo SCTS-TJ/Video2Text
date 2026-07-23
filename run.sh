@@ -10,7 +10,7 @@ cd "$(dirname "$0")"
 . .venv/bin/activate
 
 PORT=8137
-LOG="$PWD/.uvicorn.log"
+LOG="/Volumes/Studio_IT_Dev/Video2Text/uvicorn.log"
 PIDFILE="$PWD/.v2t.pid"
 
 export HTTP_PROXY=http://192.168.121.44:7890
@@ -43,6 +43,8 @@ start() {
     echo "    本机:   http://127.0.0.1:${PORT}"
     echo "    局域网: http://$(ipconfig getifaddr en0 2>/dev/null || echo '本机IP'):${PORT}"
     echo "    日志:   $LOG"
+    # 追加启动记录到 video2text.log
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] [run.sh] 服务启动 PID=$(cat "$PIDFILE") 端口=${PORT}" >> "/Volumes/Studio_IT_Dev/Video2Text/video2text.log"
   else
     echo "[失败] 启动异常, 查看日志:"; tail -10 "$LOG"
     exit 1

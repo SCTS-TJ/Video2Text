@@ -13,6 +13,10 @@ import subprocess
 
 import requests
 
+from .logger import get_logger
+
+logger = get_logger(__name__)
+
 ASR_URL = os.getenv("ASR_URL", "http://192.168.121.99:7860/transcribe")
 FFPROBE = "/opt/homebrew/bin/ffprobe"
 _NO_PROXY = {"http": None, "https": None}
@@ -157,16 +161,19 @@ def transcribe(
 
     # 本地获取真实音频时长 (ffprobe, 只读元数据, 毫秒级)
     real_duration = _get_audio_duration(audio_path)
+    logger.info("ASR请求 audio=%s language=%s duration=%.1fs", os.path.basename(audio_path), language, real_duration)
 
     try:
         with open(audio_path, "rb") as f:
             r = requests.post(ASR_URL, files={"file": (os.path.basename(audio_path), f)},
                             data={"language": language}, timeout=timeout, proxies=_NO_PROXY)
         if r.status_code != 200:
+            logger.warning("ASR HTTP错误 status=%s url=%s", r.status_code, ASR_URL)
             return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                     "error": f"Dell ASR http {r.status_code}"}
         dell = r.json()
         if not dell.get("ok"):
+            logger.warning("ASR服务返回失败 error=%s", dell.get("error"))
             return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                     "error": dell.get("error", "Dell ASR failed")}
 
@@ -174,6 +181,8 @@ def transcribe(
         lang = dell.get("language", language)
         # 用真实时长, 丢弃 Dell 的推理耗时
         dur = real_duration
+
+        logger.info("ASR响应成功 text_len=%d lang=%s dur=%.1fs", len(text), lang, dur)
 
         # 优先使用 Dell 返回的真实 segments (含 word-level timestamps)
         # 后退: 为兼容老服务端, 仍保留估算分支
@@ -190,17 +199,21 @@ def transcribe(
                 if s.get("words"):
                     seg_obj["words"] = s["words"]
                 segments.append(seg_obj)
+            logger.info("ASR使用Dell时间戳 segments=%d (含word-level)", len(segments))
         else:
             # 老服务端或错误时才走估算
             segments = _estimate_segments(text, dur)
+            logger.info("ASR使用本地估算 segments=%d", len(segments))
 
         return {
             "ok": True, "text": text, "segments": segments,
             "duration": dur, "language": lang, "error": None,
         }
     except requests.Timeout:
+        logger.warning("ASR超时 timeout=%ss url=%s", timeout, ASR_URL)
         return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                 "error": "Dell ASR timeout"}
     except Exception as e:
+        logger.error("ASR异常 %s: %s", type(e).__name__, e, exc_info=True)
         return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                 "error": f"{type(e).__name__}: {e}"}
