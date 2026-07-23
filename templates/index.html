@@ -534,7 +534,7 @@ function renderSegments(segments){
   }
   // 重启同步
   lastActiveIdx = -1;
-  if(syncFollowEnabled) startSyncFollow();
+  startSyncFollow(); // 始终绑定timeupdate监听, 同步开关只控制自动滚动
 }
 
 // ---- 显示源链接 ----
