@@ -422,7 +422,7 @@ function renderResult(d, url){
     iframe.onload = () => { try{ ytPlayer = iframe.contentWindow; }catch(e){} };
   } else if(d.file_url && d.has_media !== false){
     const isVideo = d.media_type === "video";
-    const tag = isVideo ? "video" : "video";
+    const tag = isVideo ? "video" : "audio";
     stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
     mediaEl = document.getElementById("mediaPlayer");
     $("left-meta").textContent = isVideo ? "\U0001f3ac 视频预览" : "\U0001f3b5 预览";

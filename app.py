@@ -197,7 +197,24 @@ def _build_payload(result: dict, url: str) -> dict:
 
     if payload.get("file_url"):
         ext = os.path.splitext(payload["file_url"])[1].lower()
-        payload["media_type"] = "video" if ext in (".mp4", ".webm", ".mkv", ".mov") else "audio"
+        # 先按扩展名初判
+        guessed = "video" if ext in (".mp4", ".webm", ".mkv", ".mov") else "audio"
+        # 如果有本地文件, 用 ffprobe 确认是否有视频轨
+        local_path = result.get("video_path", "") or result.get("path", "")
+        if guessed == "video" and local_path and os.path.isfile(local_path):
+            import subprocess, json as _json
+            try:
+                r = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-print_format", "json",
+                     "-show_streams", local_path],
+                    capture_output=True, text=True, timeout=10)
+                info = _json.loads(r.stdout)
+                has_video = any(s.get("codec_type") == "video" for s in info.get("streams", []))
+                if not has_video:
+                    guessed = "audio"
+            except Exception:
+                pass  # 探测失败则沿用扩展名判断
+        payload["media_type"] = guessed
     else:
         payload["media_type"] = ""
 
