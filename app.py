@@ -13,6 +13,7 @@ FastAPI 提供:
 import json
 import mimetypes
 import os
+import subprocess
 import re
 import threading
 import time
