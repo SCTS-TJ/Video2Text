@@ -277,7 +277,7 @@
     </div>
 
     <div class="col" id="rightCol">
-      <div class="head"><b>📝 文案</b><span id="right-meta" class="pill">等待处理</span><button id="syncToggle" class="sync-toggle on" onclick="toggleSyncFollow()" title="切换是否自动滚动跟随当前字符">⏮ 同步</button></div>
+      <div class="head"><b>📝 文案</b><span id="right-meta" class="pill">等待处理</span></div>
       <div class="textwrap" id="text">
         <div class="placeholder"><div class="big">💬</div>转写结果将在这里展示</div>
       </div>
@@ -431,7 +431,6 @@ function renderResult(d, url){
     setSourceUrl(d.source_url);
     // 绑定同步事件
     if(window._segRows && window._segRows.length){
-      startSyncFollow();
       setupScrollDetection();
     }
   } else if(d.channel === "transcript"){
@@ -553,7 +552,6 @@ function setSourceUrl(url){
 // ==== 字幕同步高亮核心 ====
 
 // 同步状态
-let syncFollowEnabled = true;   // 是否自动滚动跟随
 let lastActiveIdx = -1;          // 上次激活的行 (-1 = 无)
 let lastHighlightedWord = -1;    // 上次高亮的词 (避免 DOM 抖动)
 let _syncRafId = null;           // requestAnimationFrame ID (用于词级更新)
@@ -662,9 +660,7 @@ function onMediaTimeUpdate(){
       const cur = rows[found];
       cur.row.classList.add("active");
       // 自动滚动到可视区
-      if(syncFollowEnabled && !isUserScrolling){
-        scrollRowIntoView(cur.row);
-      }
+      scrollRowIntoView(cur.row);
     }
     lastActiveIdx = found;
     lastHighlightedWord = -1;  // 重置词索引
@@ -736,21 +732,6 @@ function scrollRowIntoView(row){
   if(top < 50 || bottom > containerRect.height - 50){
     const targetTop = row.offsetTop - textEl.clientHeight / 2 + row.clientHeight / 2;
     textEl.scrollTo({top: Math.max(0, targetTop), behavior: "smooth"});
-  }
-}
-
-function toggleSyncFollow(){
-  syncFollowEnabled = !syncFollowEnabled;
-  isUserScrolling = false;
-  if(_userScrollTimer) clearTimeout(_userScrollTimer);
-  const btn = $("syncToggle");
-  if(btn){
-    btn.classList.toggle("on", syncFollowEnabled);
-    btn.textContent = syncFollowEnabled ? "⏎ 同步" : "⏎ 手动";
-  }
-  // 切回同步时立即滚动到当前行
-  if(syncFollowEnabled && lastActiveIdx >= 0 && window._segRows && window._segRows[lastActiveIdx]){
-    scrollRowIntoView(window._segRows[lastActiveIdx].row);
   }
 }
 
