@@ -617,7 +617,7 @@ def api_delete(req: DeleteReq) -> list[dict]:
 @app.get("/api/files")
 def api_files() -> list[dict]:
     """列出 downloads 目录下已有的音频/视频文件, 用于离线模式选择"""
-    audio_exts = {".mp3", ".wav", ".aiff", ".aac", ".m4a", ".opus", ".ogg", ".flac", ".webm", ".mp4"}
+    video_exts = {".mp4", ".webm", ".mkv", ".mov"}
     files = []
     if not os.path.isdir(DOWNLOAD_DIR):
         return files
@@ -625,7 +625,7 @@ def api_files() -> list[dict]:
         path = os.path.join(DOWNLOAD_DIR, name)
         if os.path.isfile(path):
             ext = os.path.splitext(name)[1].lower()
-            if ext in audio_exts:
+            if ext in video_exts:
                 size_mb = os.path.getsize(path) / (1024 * 1024)
                 mtime = os.path.getmtime(path)
                 files.append({

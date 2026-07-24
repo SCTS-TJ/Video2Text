@@ -258,7 +258,7 @@
   <div class="offline-bar">
     <label><input type="checkbox" id="offlineToggle" onchange="toggleOffline()"> 📁 离线模式</label>
     <select id="fileSelect" disabled onchange="onFileSelect()">
-      <option value="">— 选择已有音频文件 —</option>
+      <option value="">— 选择已有视频文件 —</option>
     </select>
     <button id="renameBtn" class="rename-btn" disabled onclick="showRenameModal()" title="重命名文件">✏️</button>
     <button id="deleteBtn" class="delete-btn" disabled onclick="showDeleteModal()" title="删除文件">🗑️</button>
@@ -958,7 +958,7 @@ async function doRename(){
 function loadFileList2(){
   fetch("/api/files").then(r => r.json()).then(files => {
     const sel = $("fileSelect");
-    sel.innerHTML = '<option value="">— 选择已有音频文件 —</option>';
+    sel.innerHTML = '<option value="">— 选择已有视频文件 —</option>';
     for(const f of files){
       const opt = document.createElement("option");
       opt.value = f.name;
