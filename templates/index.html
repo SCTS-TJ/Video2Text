@@ -351,6 +351,7 @@ async function startIngest(){
   clearActiveHighlight();
   window._segRows = null;
   window._segData = null;
+  if(_syncRafId){ clearInterval(_syncRafId); _syncRafId = null; }
   _syncTimeupdateBound = false;
 
   try{
