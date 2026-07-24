@@ -741,10 +741,16 @@ function scrollRowIntoView(row){
 
 function toggleSyncFollow(){
   syncFollowEnabled = !syncFollowEnabled;
+  isUserScrolling = false;
+  if(_userScrollTimer) clearTimeout(_userScrollTimer);
   const btn = $("syncToggle");
   if(btn){
     btn.classList.toggle("on", syncFollowEnabled);
     btn.textContent = syncFollowEnabled ? "⏎ 同步" : "⏎ 手动";
+  }
+  // 切回同步时立即滚动到当前行
+  if(syncFollowEnabled && lastActiveIdx >= 0 && window._segRows && window._segRows[lastActiveIdx]){
+    scrollRowIntoView(window._segRows[lastActiveIdx].row);
   }
 }
 
