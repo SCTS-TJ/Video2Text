@@ -320,6 +320,9 @@ async function startIngest(){
       const d = await r.json();
       if(d.transcribed && d.entry && d.entry.segments && d.entry.segments.length > 0){
         $("goBtn").disabled = false;
+        // 重置同步状态, 新文件绑定新播放器
+        if(_syncRafId){ clearInterval(_syncRafId); _syncRafId = null; }
+        _syncTimeupdateBound = false;
         lastText = d.entry.segments.map(s => s.text).join(" ");
         lastSegments = d.entry.segments;
         // 优先使用用户选择的文件作为预览源 (选 mp4 就看视频, 选 mp3 就听音频)
