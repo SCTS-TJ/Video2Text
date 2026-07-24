@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.3.0** — 新增: Bilibili 专用下载器 + 结构化日志系统 + Dell CUDA 环境修复
+**v1.4.0** — UI 优化: 源链接显示 + 离线文件过滤 + 黑屏修复 + 交互改进
 
 ## 架构
 
@@ -103,15 +103,26 @@ Video2Text/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
 
-## v1.3.0 更新内容
+## v1.4.0 更新内容
 
-- ✨ **Bilibili 支持**: 新增专用下载器，绕过 B 站 openresty WAF (HTTP 412)
-- 📝 **结构化日志**: 按日轮转，双文件输出 (video2text.log + error.log)
-- 🐞 **Bug 修复**:
-  - `_as_download_result()` 永远返回 `ok=True` → 现在继承真实结果
-  - 国内站点 (Bilibili 等) 不走代理, 避免海外 IP 被拒
-  - Dell ASR 500: 修复 `libcublas.so.12` 找不到 (加 LD_LIBRARY_PATH)
-  - 音频下载: 重试 + 备用地址 + 多流轮询
+- 🖱 **Logo 点击回主页**: 点左上角「V2」刷新回到首页
+- 🗑 **移除无用按钮**: 去掉「一键润色」「金句提炼」及对齐偏移控制条
+- 🔗 **源链接显示**: 预览 pill 显示完整视频源 URL, 可点击跳转
+- 📁 **离线模式优化**:
+  - 文件列表只显示 `.mp4/.mkv/.webm` 视频文件, 避免误选 `.mp3`
+  - 长文件名 `…` 截断, 不撑破布局
+- 🎞 **黑屏修复**:
+  - `_build_payload` 的 ffprobe 探测结果同步回 `result`, 确保存入 index
+  - `api_check_existing` 放宽探测条件, 修正历史条目的错误 `media_type`
+  - 前端 skip 模式用扩展名判断而非 entry.media_type
+  - 修复 `import subprocess` 缺失导致探测静默失败
+- 🔄 **字幕高亮修复**:
+  - 换文件后重置 `_syncRafId`, 确保新播放器绑定 timeupdate 监听
+  - 离线 skip 分支也重置同步状态 (之前遗漏提前 return)
+- 🧹 **杂项**:
+  - `api/files` 只返回视频文件
+  - `<video>` 加 `playsinline` 属性
+  - 移除「同步/手动」切换按钮 (功能不稳定)
 - 🛠 **代码健壮性**: 所有模块接入统一日志, 下载/ASR/异常全链路可追踪
 
 ## 环境要求
