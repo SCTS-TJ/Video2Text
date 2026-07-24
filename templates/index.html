@@ -283,7 +283,6 @@
       </div>
       <div class="tools">
         <button class="primary" id="copy">📋 复制</button>
-        <button id="pipBtn" onclick="togglePip()" disabled>🖼 画中画</button>
         <button id="exp-txt">📄 导出 TXT</button>
         <button id="exp-md">📝 导出 MD</button>
       </div>
@@ -425,8 +424,6 @@ function renderResult(d, url){
     stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
     mediaEl = document.getElementById("mediaPlayer");
     $("left-meta").textContent = isVideo ? "🎬 视频预览" : "🎵 预览";
-    // 画中画按钮: 仅视频可用
-    $("pipBtn").disabled = !isVideo;
     setSourceUrl(d.source_url);
     // 绑定同步事件
     if(window._segRows && window._segRows.length){
