@@ -421,7 +421,7 @@ function renderResult(d, url){
   } else if(d.file_url && d.has_media !== false){
     const isVideo = d.media_type === "video";
     const tag = isVideo ? "video" : "audio";
-    stage.innerHTML = `<${tag} id="mediaPlayer" controls src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
+    stage.innerHTML = `<${tag} id="mediaPlayer" controls playsinline src="${d.file_url}" style="width:100%;height:100%;object-fit:contain"></${tag}>`;
     mediaEl = document.getElementById("mediaPlayer");
     $("left-meta").textContent = isVideo ? "🎬 视频预览" : "🎵 预览";
     setSourceUrl(d.source_url);
