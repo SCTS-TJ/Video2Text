@@ -168,16 +168,13 @@ def download_with_audio(url: str, progress_cb=None) -> dict:
 
 def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=None) -> dict:
     """执行 yt-dlp 并解析结果。支持进度回调 progress_cb(pct, speed_str)。"""
-    # 构建环境变量
     env = {**os.environ}
     if not skip_proxy_env:
         env.update(proxy_env())
     else:
-        # 国内站点: 清除代理环境变量
         for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(key, None)
 
-    # 添加进度输出参数
     if progress_cb:
         cmd = cmd + ["--newline", "--progress", "--progress-template",
                      "[download] %(progress._percent_str)s %(progress._speed_str)s"]
@@ -190,37 +187,25 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
             text=True,
             env=env,
         )
-        last_line = ""
+        output_lines = []
         if progress_cb and proc.stdout:
-            # 逐行读取进度
             for line in proc.stdout:
-                line = line.strip()
-                last_line = line
-                if line.startswith("[download]"):
-                    parts = line.replace("[download] ", "").split()
+                line_stripped = line.strip()
+                output_lines.append(line_stripped)
+                if line_stripped.startswith("[download]"):
+                    parts = line_stripped.replace("[download] ", "").split()
                     if parts and "%" in parts[0]:
                         try:
                             pct = float(parts[0].replace("%", ""))
                             speed = parts[1] if len(parts) > 1 else ""
-                            if speed in ("KiB/s", "MiB/s", "iB/s"):
-                                pass
                             progress_cb(pct, speed)
                         except ValueError:
                             pass
-                elif "ERROR" in line or "error" in line.lower():
-                    logger.warning("yt-dlp 进度行: %s", line)
             proc.wait(timeout=600)
         else:
-            stdout, _ = proc.communicate(timeout=600)
-            last_line = stdout.strip() if stdout else ""
-            proc.wait(timeout=600)
-            # 对于非进度模式, 从 stdout 最后一行取文件路径
-            path = stdout.strip().split("\n")[-1].strip() if stdout else ""
-            if path and os.path.isfile(path):
-                pass  # use stdout path
-            else:
-                # fallback: use original logic
-                pass
+            stdout_data, _ = proc.communicate(timeout=600)
+            if stdout_data:
+                output_lines = stdout_data.strip().split("\n")
     except subprocess.TimeoutExpired:
         proc.kill()
         logger.warning("yt-dlp 超时 cmd=%s", cmd[:4])
@@ -230,18 +215,19 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": f"{type(e).__name__}: {e}"}
 
     if proc.returncode != 0:
-        err_msg = (proc.stderr or b"").decode().strip() if hasattr(proc.stderr, 'read') else "unknown error"
         logger.warning("yt-dlp 失败 retcode=%s", proc.returncode)
+        err_msg = output_lines[-1] if output_lines else "unknown error"
         return {
             "ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode,
-            "error": err_msg or "yt-dlp failed",
+            "error": err_msg,
         }
 
-    path = proc.stdout.strip().split("\n")[-1].strip()
+    # 从最后一行取文件路径
+    path = output_lines[-1].strip() if output_lines else ""
     if not path or not os.path.isfile(path):
-        path = _resolve_output(proc.stderr)
+        path = _resolve_output(proc.stderr)  # 这里的 proc.stderr 可能是 None 或 pipe
     if not path or not os.path.isfile(path):
-        logger.warning("yt-dlp 完成后文件未找到 stdout=%s", proc.stdout.strip()[:200])
+        logger.warning("yt-dlp 完成后文件未找到 output=%s", output_lines[:5] if output_lines else "empty")
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": "file not found after download"}
 
     file_size = os.path.getsize(path) if os.path.isfile(path) else 0
@@ -250,10 +236,9 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
         "ok": True,
         "path": path,
         "video_path": path if mode == "video" else "",
+        "ext": os.path.splitext(path)[1].lower(),
         "title": os.path.splitext(os.path.basename(path))[0],
-        "ext": os.path.splitext(path)[1].lstrip("."),
         "mode": mode,
-        "error": None,
     }
 
 
