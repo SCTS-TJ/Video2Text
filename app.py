@@ -323,7 +323,11 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         if _check_cancelled(task_id):
             return
 
-        result = ingest(url, transcribe=False)  # 先不转录, 只下载
+        def _prog(pct, speed):
+            with tasks_lock:
+                tasks[task_id]["progress"] = pct
+                tasks[task_id]["speed"] = speed
+        result = ingest(url, transcribe=False, progress_cb=_prog)  # 先不转录, 只下载
 
         if not result["ok"]:
             logger.warning("下载失败 task_id=%s error=%s", task_id, result.get("error"))

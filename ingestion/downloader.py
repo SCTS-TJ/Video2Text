@@ -58,7 +58,7 @@ def _bilibili_headers(url: str, cmd: list) -> None:
         ]
 
 
-def download_media(url: str, audio_only: bool = False) -> dict:
+def download_media(url: str, audio_only: bool = False, progress_cb=None) -> dict:
     """下载给定链接的媒体。
 
     返回:
@@ -113,10 +113,10 @@ def download_media(url: str, audio_only: bool = False) -> dict:
         result_mode = "video"
 
     cmd += ["--print", "after_move:filepath", "-o", out_tmpl, url]
-    return _run_ytdlp(cmd, result_mode, skip_proxy_env=is_cn)
+    return _run_ytdlp(cmd, result_mode, skip_proxy_env=is_cn, progress_cb=progress_cb)
 
 
-def download_with_audio(url: str) -> dict:
+def download_with_audio(url: str, progress_cb=None) -> dict:
     """下载完整视频 + 从中提取音频供 ASR, 返回双路径。
 
     返回:
@@ -135,7 +135,7 @@ def download_with_audio(url: str) -> dict:
     os.makedirs(cfg.download_dir, exist_ok=True)
 
     # 1. 下载视频
-    vid_result = download_media(url, audio_only=False)
+    vid_result = download_media(url, audio_only=False, progress_cb=progress_cb)
     if not vid_result.get("ok"):
         return {**vid_result, "video_path": "", "audio_ext": ""}
 
@@ -166,8 +166,8 @@ def download_with_audio(url: str) -> dict:
     return vid_result
 
 
-def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False) -> dict:
-    """执行 yt-dlp 并解析结果。"""
+def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=None) -> dict:
+    """执行 yt-dlp 并解析结果。支持进度回调 progress_cb(pct, speed_str)。"""
     # 构建环境变量
     env = {**os.environ}
     if not skip_proxy_env:
@@ -177,15 +177,52 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False) -> dict:
         for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
             env.pop(key, None)
 
+    # 添加进度输出参数
+    if progress_cb:
+        cmd = cmd + ["--newline", "--progress", "--progress-template",
+                     "[download] %(progress._percent_str)s %(progress._speed_str)s"]
+
     try:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT if progress_cb else subprocess.PIPE,
             text=True,
-            timeout=600,
             env=env,
         )
+        last_line = ""
+        if progress_cb and proc.stdout:
+            # 逐行读取进度
+            for line in proc.stdout:
+                line = line.strip()
+                last_line = line
+                if line.startswith("[download]"):
+                    parts = line.replace("[download] ", "").split()
+                    if parts and "%" in parts[0]:
+                        try:
+                            pct = float(parts[0].replace("%", ""))
+                            speed = parts[1] if len(parts) > 1 else ""
+                            if speed in ("KiB/s", "MiB/s", "iB/s"):
+                                pass
+                            progress_cb(pct, speed)
+                        except ValueError:
+                            pass
+                elif "ERROR" in line or "error" in line.lower():
+                    logger.warning("yt-dlp 进度行: %s", line)
+            proc.wait(timeout=600)
+        else:
+            stdout, _ = proc.communicate(timeout=600)
+            last_line = stdout.strip() if stdout else ""
+            proc.wait(timeout=600)
+            # 对于非进度模式, 从 stdout 最后一行取文件路径
+            path = stdout.strip().split("\n")[-1].strip() if stdout else ""
+            if path and os.path.isfile(path):
+                pass  # use stdout path
+            else:
+                # fallback: use original logic
+                pass
     except subprocess.TimeoutExpired:
+        proc.kill()
         logger.warning("yt-dlp 超时 cmd=%s", cmd[:4])
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": "download timeout"}
     except Exception as e:
@@ -193,11 +230,11 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False) -> dict:
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": f"{type(e).__name__}: {e}"}
 
     if proc.returncode != 0:
-        err_msg = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else "unknown yt-dlp error"
-        logger.warning("yt-dlp 失败 retcode=%s error=%s", proc.returncode, err_msg)
+        err_msg = (proc.stderr or b"").decode().strip() if hasattr(proc.stderr, 'read') else "unknown error"
+        logger.warning("yt-dlp 失败 retcode=%s", proc.returncode)
         return {
             "ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode,
-            "error": err_msg,
+            "error": err_msg or "yt-dlp failed",
         }
 
     path = proc.stdout.strip().split("\n")[-1].strip()

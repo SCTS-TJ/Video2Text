@@ -218,12 +218,24 @@
   .tools button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;cursor:pointer;border:none;font-weight:600}
   .tools button.soon{opacity:.5;cursor:not-allowed}
   .progress-wrap{
-    height:3px;background:var(--panel2);overflow:hidden;flex-shrink:0;
+    height:4px;background:var(--panel2);overflow:hidden;flex-shrink:0;position:relative;
   }
   .progress-bar{
     height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));
-    transition:width .3s ease;
+    transition:width .4s ease;border-radius:0 2px 2px 0;
   }
+  .progress-bar.indet{
+    width:30%;animation:progIndet 1.5s ease infinite;
+  }
+  @keyframes progIndet{
+    0%{transform:translateX(-100%)}
+    100%{transform:translateX(400%)}
+  }
+  .prog-info{
+    display:flex;justify-content:space-between;padding:2px 14px 0;
+    font-size:10px;color:var(--sub);flex-shrink:0;
+  }
+  .prog-info span{white-space:nowrap}
   .status{
     padding:8px 14px;font-size:12px;border-top:1px solid var(--line);flex-shrink:0;
     display:flex;align-items:center;gap:2px;overflow:hidden;
@@ -302,6 +314,10 @@
       </div>
       <div class="progress-wrap" id="progressWrap" style="display:none">
         <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="prog-info" id="progInfo" style="display:none">
+        <span id="progSpeed"></span>
+        <span id="progPct"></span>
       </div>
       <div class="status" id="status">
         <span class="step" data-step="ready">⬤ 就绪</span>
@@ -407,8 +423,8 @@ async function startIngest(){
         const s = d.status;
         const res = d.result || {};
 
-        if(s === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5); }
-        else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40); }
+        if(s === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5, d.speed); }
+        else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40, d.speed); }
         else if(s === "error"){ setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
         else if(s === "done"){
           clearInterval(pollTimer);
