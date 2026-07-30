@@ -323,11 +323,55 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         if _check_cancelled(task_id):
             return
 
-        def _prog(pct, speed):
-            with tasks_lock:
-                tasks[task_id]["progress"] = pct
-                tasks[task_id]["speed"] = speed
-        result = ingest(url, transcribe=False, progress_cb=_prog)  # 先不转录, 只下载
+        # 下载进度监控: 后台线程轮询 downloads/ 目录大小, 实时计算速度和百分比
+        def _start_download_monitor():
+            import threading
+            stop_flag = threading.Event()
+            baseline = set(os.listdir(DOWNLOAD_DIR))
+            start_time = time.time()
+            last_size = 0
+            last_time = start_time
+            def _monitor():
+                nonlocal last_size, last_time
+                while not stop_flag.is_set():
+                    time.sleep(0.5)
+                    try:
+                        new_files = set(os.listdir(DOWNLOAD_DIR)) - baseline
+                        if not new_files:
+                            continue
+                        # 找最新文件
+                        newest = max(new_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
+                        fpath = os.path.join(DOWNLOAD_DIR, newest)
+                        if not os.path.isfile(fpath):
+                            continue
+                        cur_size = os.path.getsize(fpath)
+                        now = time.time()
+                        dt = now - last_time
+                        if dt > 0.3:  # 每 0.3s 以上才更新
+                            # 计算速度
+                            speed = (cur_size - last_size) / dt
+                            if speed < 0: speed = 0
+                            speed_str = ""  # 留给前端格式化
+                            # 估算进度: 用文件大小占典型大小估算 (粗略)
+                            # 大多数视频 5-50MB, 用 50MB 做上限估算
+                            est_pct = min(95, int(cur_size / (50 * 1024 * 1024) * 100))
+                            with tasks_lock:
+                                tasks[task_id]["progress"] = est_pct
+                                tasks[task_id]["speed"] = f"{speed/1024/1024:.1f}MB/s" if speed > 1024*1024 else f"{speed/1024:.0f}KB/s"
+                            last_size = cur_size
+                            last_time = now
+                    except Exception:
+                        pass
+            t = threading.Thread(target=_monitor, daemon=True)
+            t.start()
+            return stop_flag
+
+        monitor_stop = _start_download_monitor()
+        result = ingest(url, transcribe=False)  # 先不转录, 只下载
+        if monitor_stop: monitor_stop.set()
+        # 下载完成后进度设为 100, 为转写做准备
+        with tasks_lock:
+            tasks[task_id]["progress"] = 95
 
         if not result["ok"]:
             logger.warning("下载失败 task_id=%s error=%s", task_id, result.get("error"))
@@ -358,6 +402,24 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             tasks[task_id]["status"] = "transcribing"
             tasks[task_id]["progress"] = 40
             tasks[task_id]["result"] = _build_payload(result, url)
+        # 转写进度: 用时间估算 (按每分钟 10x 实时速度估算)
+        transcribe_start = time.time()
+        def _transcribe_timer():
+            while True:
+                time.sleep(1)
+                with tasks_lock:
+                    if tasks[task_id]["status"] != "transcribing":
+                        break
+                    elapsed = time.time() - transcribe_start
+                    # 假设: 音频 60s 长 → 估算进度
+                    audio_dur = result.get("duration", 0) or 60
+                    est = 40 + min(55, int((elapsed / (audio_dur * 0.6)) * 55))
+                    tasks[task_id]["progress"] = min(99, est)
+                    tasks[task_id]["speed"] = f"{elapsed:.0f}s"
+        import threading
+        timer_thread = threading.Thread(target=_transcribe_timer, daemon=True)
+        timer_thread.start()
+        tasks[task_id]["speed"] = "0s"
 
         if _check_cancelled(task_id):
             return
