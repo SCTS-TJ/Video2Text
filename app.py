@@ -607,15 +607,25 @@ def api_delete(req: DeleteReq) -> list[dict]:
                 del files_dict[n]
                 changed = True
             else:
-                # 例如删 mp4 但索引中是 mp3 为主键
-                for k in list(files_dict.keys()):
-                    entry = files_dict[k]
-                    rels = entry.get("related_files") or entry.get("aliases") or []
-                    if n in rels:
-                        # 也移除该主键 (因为关联文件不存在了)
-                        del files_dict[k]
-                        changed = True
-                        break
+                # 删 mp4 时也删对应 mp3 键 (index 以 mp3 为键)
+                if n.endswith((".mp4", ".webm", ".mkv", ".mov")):
+                    base, _ = os.path.splitext(n)
+                    for alt_ext in (".mp3", ".m4a", ".wav", ".opus", ".ogg"):
+                        mp3_key = base + alt_ext
+                        if mp3_key in files_dict:
+                            del files_dict[mp3_key]
+                            changed = True
+                            logger.info("已从索引移除配对键 key=%s (对应 %s)", mp3_key, n)
+                            break
+                if not changed:
+                    # 例如删 mp4 但索引中是 mp3 为主键
+                    for k in list(files_dict.keys()):
+                        entry = files_dict[k]
+                        rels = entry.get("related_files") or entry.get("aliases") or []
+                        if n in rels:
+                            del files_dict[k]
+                            changed = True
+                            break
         if changed:
             _save(idx)
 
@@ -656,6 +666,8 @@ def api_task(task_id: str) -> dict:
         return {
             "task_id": task_id,
             "status": task["status"],
+            "progress": task.get("progress", 0),
+            "speed": task.get("speed", ""),
             "result": task["result"],
             "error": task["error"],
         }
