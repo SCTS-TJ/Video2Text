@@ -42,6 +42,10 @@ os.makedirs(TRANSCRIPT_DIR, exist_ok=True)
 _stop_flags: dict[str, threading.Event] = {}
 _stop_flags_lock = threading.Lock()
 
+# ---- SMB 缓存: 最近删除的文件, 60s 内从 api_files 过滤 ----
+_recently_deleted: dict[str, float] = {}  # name -> timestamp
+
+
 
 def _is_already_transcribed(file_name: str) -> dict | None:
     """检查文件名是否已经在转写索引中。
@@ -635,6 +639,7 @@ def api_delete(req: DeleteReq) -> list[dict]:
     try:
         os.remove(path)
         deleted.append(name)
+        _recently_deleted[name] = time.time()
         logger.info("文件删除 name=%s path=%s", name, path)
     except Exception as e:
         logger.warning("文件删除失败 name=%s error=%s", name, e)
@@ -694,6 +699,14 @@ def api_delete(req: DeleteReq) -> list[dict]:
     return api_files()
 
 
+def _cleanup_deleted_cache():
+    """清除超过60s的最近删除记录"""
+    now = time.time()
+    for k in list(_recently_deleted.keys()):
+        if now - _recently_deleted[k] > 60:
+            del _recently_deleted[k]
+
+
 @app.get("/api/files")
 def api_files() -> list[dict]:
     """列出 downloads 目录下已有的音频/视频文件, 用于离线模式选择"""
@@ -701,7 +714,10 @@ def api_files() -> list[dict]:
     files = []
     if not os.path.isdir(DOWNLOAD_DIR):
         return files
+    _cleanup_deleted_cache()
     for name in sorted(os.listdir(DOWNLOAD_DIR), key=lambda n: os.path.getmtime(os.path.join(DOWNLOAD_DIR, n)), reverse=True):
+        if name in _recently_deleted:
+            continue
         path = os.path.join(DOWNLOAD_DIR, name)
         if os.path.isfile(path):
             ext = os.path.splitext(name)[1].lower()
