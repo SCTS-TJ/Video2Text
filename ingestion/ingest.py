@@ -70,7 +70,7 @@ def ingest(url: str, force_download: bool = False, transcribe: bool = True, prog
             }
         # 通道 B: 无字幕 -> 下视频 -> 提音频 -> ASR
         logger.info("通道A失败, 降级到通道B: 下载+ASR url=%s", url)
-        dl = downloader.download_with_audio(url)
+        dl = downloader.download_with_audio(url, progress_cb=progress_cb)
         if not dl["ok"]:
             logger.warning("通道B下载失败 error=%s", dl.get("error"))
             return {"channel": "download_video", **dl}
@@ -105,7 +105,7 @@ def ingest(url: str, force_download: bool = False, transcribe: bool = True, prog
     if _is_youtube(url):
         # 强制下载: 下载视频
         logger.info("通道B(强制): YouTube强制下载 url=%s", url)
-        return _as_download_result(downloader.download_with_audio(url))
+        return _as_download_result(downloader.download_with_audio(url, progress_cb=progress_cb))
 
     if _is_bilibili(url):
         # 通道 D: Bilibili 专用下载 (绕过 yt-dlp WAF)
@@ -143,7 +143,7 @@ def ingest(url: str, force_download: bool = False, transcribe: bool = True, prog
 
     # 其他平台: 直接下载
     logger.info("通道C: 其他平台下载 url=%s", url)
-    return _as_download_result(downloader.download_with_audio(url))
+    return _as_download_result(downloader.download_with_audio(url, progress_cb=progress_cb))
 
 
 def _as_download_result(dl: dict) -> dict:

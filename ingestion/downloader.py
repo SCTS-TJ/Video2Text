@@ -205,7 +205,7 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
         else:
             stdout_data, _ = proc.communicate(timeout=600)
             if stdout_data:
-                output_lines = stdout_data.strip().split("\n")
+                output_lines = stdout_data.strip().splitlines()
     except subprocess.TimeoutExpired:
         proc.kill()
         logger.warning("yt-dlp 超时 cmd=%s", cmd[:4])
