@@ -217,6 +217,13 @@
   .tools button:hover{border-color:var(--accent)}
   .tools button.primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0b0f1a;cursor:pointer;border:none;font-weight:600}
   .tools button.soon{opacity:.5;cursor:not-allowed}
+  .progress-wrap{
+    height:3px;background:var(--panel2);overflow:hidden;flex-shrink:0;
+  }
+  .progress-bar{
+    height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2));
+    transition:width .3s ease;
+  }
   .status{
     padding:8px 14px;font-size:12px;border-top:1px solid var(--line);flex-shrink:0;
     display:flex;align-items:center;gap:2px;overflow:hidden;
@@ -293,6 +300,9 @@
         <button id="exp-txt">📄 导出 TXT</button>
         <button id="exp-md">📝 导出 MD</button>
       </div>
+      <div class="progress-wrap" id="progressWrap" style="display:none">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
       <div class="status" id="status">
         <span class="step" data-step="ready">⬤ 就绪</span>
         <span class="step" data-step="download">⬤ 下载</span>
@@ -363,6 +373,7 @@ async function startIngest(){
   mediaEl = null;
   isYoutube = false;
   ytPlayer = null;
+  hideProgress();
   clearActiveHighlight();
   window._segRows = null;
   window._segData = null;
@@ -396,8 +407,8 @@ async function startIngest(){
         const s = d.status;
         const res = d.result || {};
 
-        if(s === "downloading") setStatus("download", "run");
-        else if(s === "transcribing") setStatus("transcribe", "run");
+        if(s === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5); }
+        else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40); }
         else if(s === "error"){ setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
         else if(s === "done"){
           clearInterval(pollTimer);
@@ -801,6 +812,18 @@ function download(content, name, type){
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
   URL.revokeObjectURL(a.href);
 }
+function updateProgress(pct){
+  var bar = $("progressBar");
+  var wrap = $("progressWrap");
+  if(!bar || !wrap) return;
+  wrap.style.display = "";
+  bar.style.width = Math.min(100, Math.max(0, pct)) + "%";
+}
+function hideProgress(){
+  var wrap = $("progressWrap");
+  if(wrap) wrap.style.display = "none";
+}
+
 function setStatus(step, cls){
   var s = $("status");
   if(!s) return;

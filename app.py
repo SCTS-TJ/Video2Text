@@ -144,7 +144,7 @@ app = FastAPI(title="Video2Text")
 
 # ---- 异步任务管理 ----
 
-tasks: dict = {}  # task_id -> {"status": "downloading"|"transcribing"|"done"|"error"|"cancelled", "result": {}, "error": str|None}
+tasks: dict = {}  # task_id -> {"status": ..., "progress": 0-100, "result": {}, "error": str|None}
 tasks_lock = threading.Lock()
 
 
@@ -245,6 +245,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             logger.info("离线模式 task_id=%s local_file=%s", task_id, local_file)
             with tasks_lock:
                 tasks[task_id]["status"] = "transcribing"
+            tasks[task_id]["progress"] = 40
             file_path = os.path.join(DOWNLOAD_DIR, local_file)
             if not os.path.isfile(file_path):
                 logger.warning("本地文件不存在 task_id=%s path=%s", task_id, file_path)
@@ -317,6 +318,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         logger.info("开始下载 task_id=%s url=%s", task_id, url)
         with tasks_lock:
             tasks[task_id]["status"] = "downloading"
+            tasks[task_id]["progress"] = 5
 
         if _check_cancelled(task_id):
             return
@@ -339,6 +341,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             logger.info("字幕直取完成 task_id=%s text_len=%d", task_id, len(result.get("text", "")))
             with tasks_lock:
                 tasks[task_id]["status"] = "done"
+                tasks[task_id]["progress"] = 100
                 tasks[task_id]["result"] = _build_payload(result, url)
                 _save_transcript(result, url)
                 _index_entry(result, url)
@@ -349,6 +352,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                     task_id, result["channel"], result.get("path"), result.get("video_path"))
         with tasks_lock:
             tasks[task_id]["status"] = "transcribing"
+            tasks[task_id]["progress"] = 40
             tasks[task_id]["result"] = _build_payload(result, url)
 
         if _check_cancelled(task_id):
@@ -400,7 +404,7 @@ def api_ingest(req: IngestReq) -> dict:
     """提交采集任务, 立即返回 task_id, 后台执行"""
     task_id = uuid.uuid4().hex[:12]
     with tasks_lock:
-        tasks[task_id] = {"status": "queued", "result": {}, "error": None}
+        tasks[task_id] = {"status": "queued", "progress": 0, "result": {}, "error": None}
 
     # 初始化停止标志
     with _stop_flags_lock:
