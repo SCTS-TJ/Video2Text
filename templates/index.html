@@ -411,6 +411,7 @@ async function startIngest(){
       body
     });
     const t = await r1.json();
+    localStorage.setItem("v2t_active_task", t.task_id);
     if(!r1.ok){ setStatus("失败：" + (t.detail||"未知错误"), "err"); $("goBtn").disabled = false; return; }
     lastTaskId = t.task_id;
     var taskId = t.task_id;
@@ -425,10 +426,11 @@ async function startIngest(){
 
         if(s === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5, d.speed); }
         else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40, d.speed); }
-        else if(s === "error"){ hideProgress(); setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
+        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
         else if(s === "done"){
           updateProgress(100); setTimeout(function(){hideProgress()},800);
           setStatus("done", "ok");
+          localStorage.removeItem("v2t_active_task");
           clearInterval(pollTimer);
           renderResult(res, url);
           $("goBtn").disabled = false;
@@ -1060,6 +1062,56 @@ function loadFileList2(){
       sel.appendChild(opt);
     }
   }).catch(() => {});
+}
+
+// ---- 页面刷新重连: 检查是否有未完成的任务 ----
+function reconnectTask(){
+  var activeTaskId = localStorage.getItem("v2t_active_task");
+  if(!activeTaskId) return;
+  fetch("/api/task/" + activeTaskId).then(function(r){
+    if(!r.ok){ localStorage.removeItem("v2t_active_task"); return; }
+    return r.json();
+  }).then(function(d){
+    if(!d) return;
+    if(d.status === "done" || d.status === "error" || d.status === "cancelled"){
+      localStorage.removeItem("v2t_active_task");
+      return;
+    }
+    // 重新连接, 显示状态
+    lastTaskId = activeTaskId;
+    if(d.status === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5, d.speed); }
+    else if(d.status === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40, d.speed); }
+    $("stopBtn").style.display = "";
+    $("goBtn").disabled = true;
+    $("urlInput").disabled = true;
+    $("skipExisting").disabled = true;
+    // 继续轮询
+    pollTimer = setInterval(function(){
+      fetch("/api/task/" + lastTaskId).then(function(r2){ return r2.json(); }).then(function(d2){
+        var s = d2.status;
+        var res = d2.result;
+        if(s === "downloading") { setStatus("download", "run"); updateProgress(d2.progress || 5, d2.speed); }
+        else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d2.progress || 40, d2.speed); }
+        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d2.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
+        else if(s === "done"){
+          localStorage.removeItem("v2t_active_task");
+          updateProgress(100); setTimeout(function(){hideProgress()},800);
+          setStatus("done", "ok");
+          clearInterval(pollTimer);
+          renderResult(res, "");
+          $("goBtn").disabled = false;
+          $("stopBtn").style.display = "none";
+        }
+        else if(s === "cancelled"){
+          localStorage.removeItem("v2t_active_task");
+          clearInterval(pollTimer);
+          setStatus("\u26a0\ufe0f 已停止", "warn");
+          $("goBtn").disabled = false;
+          $("stopBtn").style.display = "none";
+        }
+      }).catch(function(){});
+    }, 1000);
+  }).catch(function(){ localStorage.removeItem("v2t_active_task"); });
 }
 
 document.addEventListener("DOMContentLoaded", () => {

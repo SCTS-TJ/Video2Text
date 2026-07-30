@@ -286,10 +286,26 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 return
 
             from ingestion.asr import transcribe
-            asr_result = transcribe(audio_path, language="zh")
-            # 检查取消 (ASR 完成后但还未落盘时)
-            if _check_cancelled(task_id):
-                return
+            import threading
+            _asr_done = threading.Event()
+            _asr_result = [None]
+            _asr_error = [None]
+            def _asr_worker():
+                try:
+                    _asr_result[0] = transcribe(audio_path, language="zh")
+                except Exception as e:
+                    _asr_error[0] = e
+                finally:
+                    _asr_done.set()
+            asr_thread = threading.Thread(target=_asr_worker, daemon=True)
+            asr_thread.start()
+            while not _asr_done.wait(timeout=0.5):
+                if _check_cancelled(task_id):
+                    with tasks_lock:
+                        tasks[task_id]["status"] = "cancelled"
+                    logger.info("离线ASR被取消 task_id=%s", task_id)
+                    return
+            asr_result = _asr_result[0] if _asr_error[0] is None else {"ok": False, "error": str(_asr_error[0])}
 
             logger.info("离线ASR完成 task_id=%s ok=%s text_len=%d segments=%d",
                         task_id, asr_result["ok"], len(asr_result.get("text", "")),
@@ -428,10 +444,30 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         if _check_cancelled(task_id):
             return
 
-        # 阶段2: ASR 转写
+        # 阶段2: ASR 转写 (子线程运行, 主线程可中断)
         logger.info("开始ASR转写 task_id=%s audio_path=%s", task_id, result.get("path"))
         from ingestion.asr import transcribe
-        asr_result = transcribe(result["path"], language="zh")
+        import threading
+        _asr_done = threading.Event()
+        _asr_result = [None]
+        _asr_error = [None]
+        def _asr_worker():
+            try:
+                _asr_result[0] = transcribe(result["path"], language="zh")
+            except Exception as e:
+                _asr_error[0] = e
+            finally:
+                _asr_done.set()
+        asr_thread = threading.Thread(target=_asr_worker, daemon=True)
+        asr_thread.start()
+        # 主线程定期检查停止标志, 接到停止信号立即放弃
+        while not _asr_done.wait(timeout=0.5):
+            if _check_cancelled(task_id):
+                with tasks_lock:
+                    tasks[task_id]["status"] = "cancelled"
+                logger.info("ASR 转写被用户取消 task_id=%s", task_id)
+                return
+        asr_result = _asr_result[0] if _asr_error[0] is None else {"ok": False, "error": str(_asr_error[0])}
 
         if _check_cancelled(task_id):
             return
