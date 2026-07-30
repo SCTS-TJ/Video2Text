@@ -953,9 +953,11 @@ function showRenameModal(){
   if(dot > 0) $("renameInput").setSelectionRange(0, dot);
 }
 function hideRenameModal(){ $("renameModal").style.display = "none"; }
+var _deleteFile = "";
 function showDeleteModal(){
-  const file = $("fileSelect").value;
-  if(!file) return;
+  _deleteFile = $("fileSelect").value;
+  if(!_deleteFile) return;
+  const file = _deleteFile;
   $("deleteFileName").textContent = file;
   // 检查配对文件
   const base = file.replace(/\.(mp3|mp4)$/i, "");
@@ -973,7 +975,7 @@ function showDeleteModal(){
 }
 function hideDeleteModal(){ $("deleteModal").style.display = "none"; }
 async function doDelete(){
-  const file = $("fileSelect").value;
+  const file = _deleteFile;
   if(!file) return;
   const keepIndex = $("deleteKeepIndex").checked;
   $("deleteConfirm").disabled = true;

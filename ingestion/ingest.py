@@ -33,7 +33,7 @@ def _is_bilibili(url: str) -> bool:
     return "bilibili.com" in h or "b23.tv" in h
 
 
-def ingest(url: str, force_download: bool = False, transcribe: bool = True) -> dict:
+def ingest(url: str, force_download: bool = False, transcribe: bool = True, progress_cb=None) -> dict:
     """采集一个社媒链接, 返回文本或下载文件信息。
 
     transcribe: 无字幕时是否自动下载并走 ASR (默认开)
