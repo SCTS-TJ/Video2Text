@@ -41,3 +41,6 @@ local_asr.py
 
 # Install logs
 .install*.log
+
+# Runtime logs
+logs/

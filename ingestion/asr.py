@@ -10,12 +10,35 @@
 import os
 import re
 import subprocess
+import time
 
 import requests
 
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _isfile_retry(path: str, retries: int = 5, delay: float = 0.5) -> bool:
+    """CIFS/SMB 挂载(actimeo 缓存)下 isfile 会间歇/持续误判 False。
+    macOS-SMB 写入未提交会导致"目录列表有、stat 报 ENOENT"脏缓存,
+    每次失败先 listdir 父目录刷新缓存再重试 stat。与 app.py 同款逻辑。
+    """
+    parent = os.path.dirname(path) or "."
+    for attempt in range(retries):
+        try:
+            st = os.stat(path)
+            import stat as _stat
+            return _stat.S_ISREG(st.st_mode)
+        except (FileNotFoundError, OSError):
+            try:
+                os.listdir(parent)
+            except OSError:
+                pass
+            if attempt < retries - 1:
+                time.sleep(delay)
+            continue
+    return False
 
 ASR_URL = os.getenv("ASR_URL", "http://192.168.121.30:7860/transcribe")
 FFPROBE = os.getenv("FFPROBE", "/usr/bin/ffprobe" if os.path.isfile("/usr/bin/ffprobe") else "/opt/homebrew/bin/ffprobe")
@@ -155,7 +178,7 @@ def transcribe(
     timeout: int = 1800,
 ) -> dict:
     """转写音频: Dell 3090 唯一解码 + ffprobe 真实时长 + 三级切分。"""
-    if not os.path.isfile(audio_path):
+    if not _isfile_retry(audio_path):
         return {"ok": False, "text": "", "segments": [], "duration": 0, "language": "",
                 "error": f"audio not found: {audio_path}"}
 

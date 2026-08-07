@@ -46,25 +46,36 @@ _stop_flags_lock = threading.Lock()
 _recently_deleted: dict[str, float] = {}  # name -> timestamp
 
 
-def _isfile_retry(path: str, retries: int = 3, delay: float = 0.4) -> bool:
-    """CIFS/SMB 挂载(actimeo 属性缓存)下 os.path.isfile 会间歇误判为 False。
+def _isfile_retry(path: str, retries: int = 5, delay: float = 0.5) -> bool:
+    """CIFS/SMB 挂载(actimeo 属性缓存)下 os.path.isfile 会间歇/持续误判为 False。
 
-    缓存抖动时 (ls 显示 -rwxr-xr-x? 元数据异常), 直接 isfile 误报"不存在"→ 误返 404。
-    这里先 os.stat 强制刷新元数据缓存, 再重试几次, 仍不存在才返回 False。
+    根治 macOS-SMB 写入未提交导致的"目录列表有、stat 报 ENOENT"脏缓存:
+      - 每次失败先 os.listdir(父目录) 强制刷新 readdir/inode 缓存(实测一刷新即恢复)
+      - 再 os.stat 穿透 actimeo 属性缓存回源 TrueNAS 取最新元数据
+      - 重试若干次, 仍不存在才返回 False
     """
+    parent = os.path.dirname(path) or "."
     for attempt in range(retries):
         try:
-            # os.stat 会穿透 CIFS 属性缓存(actimeo), 强制回源 TrueNAS 取最新元数据
+            # os.stat 穿透 CIFS 属性缓存(actimeo), 强制回源取最新元数据
             st = os.stat(path)
             import stat as _stat
             return _stat.S_ISREG(st.st_mode)
         except FileNotFoundError:
-            # 真不存在, 或缓存尚未失效; 等一下让 CIFS 缓存过期再试
+            # 可能是 readdir/inode 脏缓存: 刷新父目录缓存后重试
+            try:
+                os.listdir(parent)
+            except OSError:
+                pass
             if attempt < retries - 1:
                 time.sleep(delay)
             continue
         except OSError:
-            # 其它 IO 错误(如 SMB 抖动), 也重试
+            # 其它 IO 错误(如 SMB 抖动), 刷新父目录缓存后重试
+            try:
+                os.listdir(parent)
+            except OSError:
+                pass
             if attempt < retries - 1:
                 time.sleep(delay)
             continue
@@ -275,8 +286,9 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["status"] = "transcribing"
             tasks[task_id]["progress"] = 40
             file_path = os.path.join(DOWNLOAD_DIR, local_file)
-            if not os.path.isfile(file_path):
-                logger.warning("本地文件不存在 task_id=%s path=%s", task_id, file_path)
+            # 用 _isfile_retry 穿透 CIFS actimeo 属性缓存(离线文件常新放入, isfile 易误判 not found)
+            if not _isfile_retry(file_path):
+                logger.warning("本地文件不存在 task_id=%s path=%s (经_isfile_retry确认)", task_id, file_path)
                 with tasks_lock:
                     tasks[task_id]["status"] = "error"
                     tasks[task_id]["error"] = f"local file not found: {local_file}"
@@ -295,14 +307,14 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
             if is_video:
                 # 从视频中提取音频
                 audio_path = os.path.splitext(file_path)[0] + ".mp3"
-                if not os.path.isfile(audio_path):
+                if not _isfile_retry(audio_path):
                     import subprocess
                     subprocess.run(
                         [os.getenv("FFMPEG", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg"), "-y", "-i", file_path,
                          "-vn", "-acodec", "libmp3lame", "-q:a", "2", audio_path],
                         capture_output=True, text=True, timeout=600,
                     )
-                    if not os.path.isfile(audio_path):
+                    if not _isfile_retry(audio_path):
                         audio_path = file_path  # 回退: 直接用视频文件
 
             # 再次检查取消
