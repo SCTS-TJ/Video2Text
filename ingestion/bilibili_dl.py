@@ -18,7 +18,7 @@ from .logger import get_logger
 
 logger = get_logger(__name__)
 
-_FFMPEG = "/opt/homebrew/bin/ffmpeg"
+_FFMPEG = os.getenv("FFMPEG", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg")
 _DOWNLOAD_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
 )

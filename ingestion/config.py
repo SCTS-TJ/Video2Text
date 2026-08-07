@@ -13,7 +13,7 @@ class Config:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "downloads"
     )
     # ffmpeg 二进制 (Mac mini 已装 /opt/homebrew/bin/ffmpeg)
-    ffmpeg_location: str = "/opt/homebrew/bin/ffmpeg"
+    ffmpeg_location: str = os.getenv("FFMPEG_LOCATION", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg")
     # yt-dlp 借用本机浏览器登录态, 绕过 YouTube bot 校验
     # 取值: safari | chrome | firefox | edge ; 空字符串 "" 关闭
     ytdlp_cookies_from_browser: str = "chrome"

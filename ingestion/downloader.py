@@ -21,7 +21,7 @@ _YTDLP = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
 if not os.path.isfile(_YTDLP):
     _YTDLP = "yt-dlp"  # 兜底: 系统 PATH
 
-_FFMPEG = "/opt/homebrew/bin/ffmpeg"
+_FFMPEG = os.getenv("FFMPEG", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg")
 
 # 国内站点域名列表 (这些站点不需要走代理)
 _CHINESE_DOMAINS = [

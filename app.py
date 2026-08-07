@@ -274,7 +274,7 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 if not os.path.isfile(audio_path):
                     import subprocess
                     subprocess.run(
-                        ["/opt/homebrew/bin/ffmpeg", "-y", "-i", file_path,
+                        [os.getenv("FFMPEG", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg"), "-y", "-i", file_path,
                          "-vn", "-acodec", "libmp3lame", "-q:a", "2", audio_path],
                         capture_output=True, text=True, timeout=600,
                     )
