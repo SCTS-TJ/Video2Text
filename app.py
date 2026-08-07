@@ -46,6 +46,30 @@ _stop_flags_lock = threading.Lock()
 _recently_deleted: dict[str, float] = {}  # name -> timestamp
 
 
+def _isfile_retry(path: str, retries: int = 3, delay: float = 0.4) -> bool:
+    """CIFS/SMB 挂载(actimeo 属性缓存)下 os.path.isfile 会间歇误判为 False。
+
+    缓存抖动时 (ls 显示 -rwxr-xr-x? 元数据异常), 直接 isfile 误报"不存在"→ 误返 404。
+    这里先 os.stat 强制刷新元数据缓存, 再重试几次, 仍不存在才返回 False。
+    """
+    for attempt in range(retries):
+        try:
+            # os.stat 会穿透 CIFS 属性缓存(actimeo), 强制回源 TrueNAS 取最新元数据
+            st = os.stat(path)
+            import stat as _stat
+            return _stat.S_ISREG(st.st_mode)
+        except FileNotFoundError:
+            # 真不存在, 或缓存尚未失效; 等一下让 CIFS 缓存过期再试
+            if attempt < retries - 1:
+                time.sleep(delay)
+            continue
+        except OSError:
+            # 其它 IO 错误(如 SMB 抖动), 也重试
+            if attempt < retries - 1:
+                time.sleep(delay)
+            continue
+    return False
+
 
 def _is_already_transcribed(file_name: str) -> dict | None:
     """检查文件名是否已经在转写索引中。
@@ -668,7 +692,9 @@ def api_delete(req: DeleteReq) -> list[dict]:
         raise HTTPException(status_code=400, detail="invalid filename")
 
     path = os.path.join(DOWNLOAD_DIR, name)
-    if not os.path.isfile(path):
+    # CIFS 缓存容错: isfile 误判时用 os.stat 穿透缓存重试
+    if not _isfile_retry(path):
+        logger.warning("删除前文件确认不存在(已重试) name=%s path=%s", name, path)
         raise HTTPException(status_code=404, detail=f"file not found: {name}")
 
     deleted = []
@@ -691,7 +717,7 @@ def api_delete(req: DeleteReq) -> list[dict]:
         pair_name = None
     if pair_name:
         pair_path = os.path.join(DOWNLOAD_DIR, pair_name)
-        if os.path.isfile(pair_path):
+        if _isfile_retry(pair_path):
             try:
                 os.remove(pair_path)
                 deleted.append(pair_name)
