@@ -129,7 +129,7 @@ Video2Text/
 
 - Python 3.11+
 - ffmpeg / ffprobe
-- 局域网内 Dell 工作站 (192.168.121.99:7860, SSH 用户: boothgianni)
+- 局域网内 Dell 工作站 (192.168.121.30:7860, SSH 用户: boothgianni)
 - 可选: 旁路由代理 (iStoreOS 192.168.121.44:7890) 用于翻墙
 
 ## License

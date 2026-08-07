@@ -17,7 +17,7 @@ from .logger import get_logger
 
 logger = get_logger(__name__)
 
-ASR_URL = os.getenv("ASR_URL", "http://192.168.121.99:7860/transcribe")
+ASR_URL = os.getenv("ASR_URL", "http://192.168.121.30:7860/transcribe")
 FFPROBE = "/opt/homebrew/bin/ffprobe"
 _NO_PROXY = {"http": None, "https": None}
 
