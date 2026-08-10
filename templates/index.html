@@ -48,7 +48,25 @@
   .bar .skip-label{
     display:flex;align-items:center;gap:5px;color:var(--sub);font-size:12px;white-space:nowrap;cursor:pointer;
   }
-  .bar .skip-label input[type=checkbox]{accent-color:var(--accent2);width:14px;height:14px;cursor:pointer}
+    .bar .skip-label input[type=checkbox]{accent-color:var(--accent2);width:14px;height:14px;cursor:pointer}
+  /* ---- 服务状态指示灯 ---- */
+  .svc-status{margin-left:auto;display:flex;align-items:center;gap:6px;flex-shrink:0;font-size:11px;color:var(--sub)}
+  .svc-lights{display:flex;align-items:center;gap:4px}
+  .svc-light{display:inline-flex;align-items:center;gap:4px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:2px 8px;cursor:pointer;transition:.15s}
+  .svc-light .dot{width:8px;height:8px;border-radius:50%;background:var(--line);flex-shrink:0}
+  .svc-light .dot.ok{background:var(--accent2);box-shadow:0 0 5px var(--accent2)}
+  .svc-light .dot.warn{background:#eab308;box-shadow:0 0 5px #eab308}
+  .svc-light .dot.bad{background:var(--danger);box-shadow:0 0 5px var(--danger)}
+  .svc-light:hover{border-color:var(--accent)}
+  .svc-status .svc-err{color:var(--danger);margin-left:2px;font-weight:600}
+  .svc-tip{position:relative;display:inline-flex}
+  .svc-tip .tipbox{position:absolute;top:calc(100% + 8px);right:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:200px;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:900;display:none;font-size:11px;line-height:1.7;color:var(--sub)}
+  .svc-tip.open .tipbox{display:block}
+  .svc-tip .tipbox .row{display:flex;align-items:center;gap:6px;white-space:nowrap}
+  .svc-tip .tipbox .row .n{width:72px;color:var(--txt);flex-shrink:0}
+  .svc-tip .tipbox .st-ok{color:var(--accent2)}
+  .svc-tip .tipbox .st-warn{color:#eab308}
+  .svc-tip .tipbox .st-bad{color:var(--danger)}
   .existing-badge{
     display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;
     background:rgba(52,211,153,.15);color:var(--accent2);border:1px solid rgba(52,211,153,.3);
@@ -269,6 +287,14 @@
   <header>
     <a href="/" style="text-decoration:none"><div class="logo">V2</div></a>
     <h1>Video2Text <small>社媒视频一键转文案</small></h1>
+    <div class="svc-status" id="svcStatus" title="服务状态">
+      <span>服务</span>
+      <div class="svc-lights" id="svcLights"><span class="svc-light"><span class="dot bad"></span>检测中</span></div>
+      <div class="svc-tip" id="svcTip">
+        <span class="svc-err" id="svcErr" style="display:none">⚠</span>
+        <div class="tipbox" id="svcTipbox"></div>
+      </div>
+    </div>
   </header>
 
   <div class="bar">
@@ -368,6 +394,41 @@ function _flashUrlClean(input){
   setTimeout(() => { input.style.boxShadow = ""; }, 500);
 }
 
+/* ---- 服务状态指示灯 ---- */
+function _svcDotClass(ok, degraded){ if(ok && !degraded) return "ok"; if(ok && degraded) return "warn"; return "bad"; }
+function _svcShort(svc){
+  const map = {video2text:"Web", asr:"ASR", ffmpeg:"ff", ffprobe:"ffp"};
+  return map[svc.name] || svc.name;
+}
+function renderServiceHealth(d){
+  const lights=$('svcLights'), tipbox=$('svcTipbox'), err=$('svcErr');
+  if(!lights) return;
+  const svcs = (d && d.services) ? d.services : [];
+  lights.innerHTML = '';
+  svcs.forEach(s=>{
+    const el=document.createElement('span'); el.className='svc-light';
+    el.innerHTML = '<span class="dot ' + _svcDotClass(s.ok,s.degraded) + '"></span>' + _svcShort(s);
+    el.title = s.label + ': ' + s.detail;
+    lights.appendChild(el);
+  });
+  if(tipbox && svcs.length){
+    tipbox.innerHTML = svcs.map(s=>{
+      const cl = s.ok ? (s.degraded?'st-warn':'st-ok') : 'st-bad';
+      return '<div class="row"><span class="n">'+s.label+'</span><span class="st '+cl+'">'+ (_svcDotClass(s.ok,s.degraded)==='ok'?'● ':(_svcDotClass(s.ok,s.degraded)==='warn'?'◐ ':'○ ')) + (s.detail||'') + (s.model?' · '+s.model:'') + '</span></div>';
+    }).join('');
+  }
+  const bad = svcs.filter(s=>!s.ok || s.degraded).length;
+  if(err) err.style.display = bad>0 ? '' : 'none';
+  // 无数据(接口异常)时显示全灰
+  if(!svcs.length && lights.firstChild==null) lights.innerHTML='<span class="svc-light"><span class="dot"></span>--</span>';
+}
+function pollServiceHealth(){
+  fetch("/api/health", {cache:"no-store"}).then(r=>r.json()).then(d=>{
+    renderServiceHealth(d);
+  }).catch(e=>{ renderServiceHealth(null); });
+}
+// 点击详情开关
+document.addEventListener("click",(e)=>{ const tip=$('svcTip'); if(!tip) return; if(tip.contains(e.target)){ tip.classList.toggle('open'); } else { tip.classList.remove('open'); } });
 function bindUrlCleaner(){
   const input = $("urlInput");
   if(!input) return;
@@ -389,6 +450,7 @@ function bindUrlCleaner(){
   });
 }
 document.addEventListener("DOMContentLoaded", bindUrlCleaner);
+document.addEventListener("DOMContentLoaded", () => { pollServiceHealth(); setInterval(pollServiceHealth, 30000); });
 
 async function startIngest(){
   const url = extractUrl($("urlInput").value);

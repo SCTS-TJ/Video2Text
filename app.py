@@ -18,6 +18,7 @@ import re
 import threading
 import time
 import uuid
+import requests
 from datetime import datetime
 from urllib.parse import urlparse
 
@@ -806,6 +807,60 @@ def api_files() -> list[dict]:
                     "modified": datetime.fromtimestamp(mtime).strftime("%m-%d %H:%M"),
                 })
     return files
+
+
+@app.get("/api/health")
+def api_health() -> dict:
+    """服务健康指示灯: 探测本服务 / ASR算力 / ffmpeg工具链 是否就绪"""
+    def _probe_asr():
+        # 从 asr 模块读真实 ASR_URL (systemd 注入的 99:7860/transcribe), 反推 base + /health
+        try:
+            from ingestion.asr import ASR_URL
+        except Exception:
+            ASR_URL = os.getenv("ASR_URL", "http://192.168.121.99:7860/transcribe")
+        base = ASR_URL.rsplit("/transcribe", 1)[0] if "/transcribe" in ASR_URL else ASR_URL
+        try:
+            r = requests.get(base + "/health", timeout=3, proxies={"http": None, "https": None})
+            if r.status_code == 200:
+                d = r.json()
+                ok = d.get("status") == "ok"
+                # 方案A: 服务可达即算正常, 懒加载(model_loaded=false)不再视为降级
+                return {
+                    "ok": ok, "reachable": True, "model_loaded": bool(d.get("model_loaded")),
+                    "model": d.get("model", "?"), "gpu": d.get("gpu"),
+                    "degraded": False,
+                }
+            return {"ok": False, "reachable": True, "model_loaded": False, "http": r.status_code}
+        except Exception as e:
+            return {"ok": False, "reachable": False, "error": type(e).__name__, "model_loaded": False}
+
+    def _probe_bin(path):
+        return bool(path and os.path.isfile(path))
+
+    ffmpeg = os.getenv("FFMPEG", "/usr/bin/ffmpeg" if os.path.isfile("/usr/bin/ffmpeg") else "/opt/homebrew/bin/ffmpeg")
+    ffprobe = os.getenv("FFPROBE", "/usr/bin/ffprobe" if os.path.isfile("/usr/bin/ffprobe") else "/opt/homebrew/bin/ffprobe")
+    asr = _probe_asr()
+    ffmpeg_ok = _probe_bin(ffmpeg)
+    ffprobe_ok = _probe_bin(ffprobe)
+
+    forced = os.getenv("FORCE_STATUS")  # 调试用
+    # Web 服务灯已移除: 页面能打开即证明本服务健康, 无需亮灯
+    services = [
+        {"name": "asr", "label": "ASR算力", "ok": asr.get("ok"),
+         "detail": ("正常" if asr.get("reachable") else "无法连接"),
+         "reachable": asr.get("reachable"), "model": asr.get("model"),
+         "model_loaded": asr.get("model_loaded"),
+         "degraded": False},
+        {"name": "ffmpeg", "label": "ffmpeg", "ok": ffmpeg_ok, "detail": ("正常" if ffmpeg_ok else "缺失")},
+        {"name": "ffprobe", "label": "ffprobe", "ok": ffprobe_ok, "detail": ("正常" if ffprobe_ok else "缺失")},
+    ]
+    if forced:
+        for svc in services:
+            if forced == "all_fail": svc["ok"] = False
+            elif forced == svc["name"]: svc["ok"] = False
+    overall = all(s.get("ok") for s in services)
+    return {"overall": overall, "services": services}
+
 
 
 @app.get("/api/task/{task_id}")
