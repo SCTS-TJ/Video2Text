@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.5.6** — 索引完整性修复: 通道A(字幕直取)不再写入空 key 垃圾索引（历史 v1.5.5: YouTube 403 修复 + 视频号专用引导）
+**v1.5.7** — 微信视频号打通: 通道F 集成 wx-downloader(腾讯元宝解析+内置解密, 需一次性扫码登录)（历史 v1.5.6: 索引完整性修复）
 
 ## 架构
 
@@ -51,7 +51,7 @@ open http://localhost:8137
 | **YouTube** + 有字幕 | 通道A — 字幕直取 | youtube-transcript-api, 零下载 |
 | **YouTube** + 无字幕 | 通道B — 下载+ASR | yt-dlp + Dell ASR 转写 |
 | **Bilibili** | 通道D — API 直连 | 绕过 WAF 412, Python requests 直接调 B站 API |
-| **微信视频号** | 通道E — 专用引导 | 无公开 API + 媒体 TEA 加密, 服务端不支持; 引导走「离线模式」 |
+| **微信视频号** | 通道F — wx-downloader | 经腾讯元宝登录态解析 + 内置解密(需一次性 `wx-downloader login` 扫码) |
 | 其他平台 | 通道C — 通用下载 | yt-dlp + 旁路由代理 |
 
 ### CLI
@@ -84,7 +84,7 @@ URL 输入
   ├─ YouTube + 有字幕 → [通道A] 字幕直取 (零下载)
   ├─ YouTube + 无字幕 → [通道B] 下载 → ASR
   ├─ Bilibili         → [通道D] Bilibili API 直连 → 下载 → ASR
-  ├─ 微信视频号        → [通道E] 专用引导 (不支持自动下载, 提示走离线模式)
+  ├─ 微信视频号        → [通道F] wx-downloader (元宝解析+内置解密, 需先 login)
   └─ 其他平台         → [通道C] yt-dlp 下载 → ASR
 
 转写完成后自动保存到 transcripts/ 目录 (.txt + .md 双格式)
@@ -99,10 +99,10 @@ Video2Text/
 ├── run.sh                # 启动/停止脚本
 ├── ingestion/
 │   ├── config.py         # 代理/路径配置
-│   ├── ingest.py         # 五通道采集路由 (A/B/C/D/E)
-│   ├── downloader.py     # yt-dlp 下载 (含国内站点代理跳过)
+│   ├── ingest.py         # 五通道采集路由 (A/B/C/D/F)
+│   ├── downloader.py     # yt-dlp 下载 (含国内站点代理跳过) + extract_audio
 │   ├── bilibili_dl.py    # Bilibili API 直连下载器 (绕 WAF)
-│   ├── weixin_channels.py# 微信视频号识别 + 引导 (通道E)
+│   ├── weixin_channels.py# 微信视频号识别 + 下载(通道F, 集成 wx-downloader)
 │   ├── transcript.py     # YouTube 字幕直取
 │   ├── asr.py            # ASR 转写 (GPU + 三级分段)
 │   ├── index.py          # 转写索引管理
@@ -110,6 +110,20 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.5.7 更新内容 (微信视频号打通 · 通道F)
+
+- 🎉 **视频号可自动下载**: 集成开源 `wx-downloader`(PyPI, 纯 Python)
+  - 原理: 经**腾讯元宝登录态**解析分享链接 → 下载 → **内置解密**(Isaac64 密钥流 XOR) → 输出可播放 MP4
+  - **无需** Go / 微信客户端 / 代理抓包 / 根证书 (远优于 wx_channels_download、wx_channel 等 MITM 方案)
+- 🔌 **通道F 集成** (`ingestion/weixin_channels.py`):
+  - `wx-downloader download <url> --no-login --json -o <临时目录>`, 用独立目录收集 `*.mp4`(不依赖其 JSON 输出 schema)
+  - 再经 `ffmpeg` 抽 `mp3` 供 ASR, 复用现有下载→转写管线
+- 🔐 **一次性前置**: 需先 `wx-downloader login` 扫码登录元宝(凭据 `~/.config/wx-channels/auth.json`, 过期需重登)
+- 🧰 `downloader.extract_audio()` 提为可复用工具函数
+
+> ⚠️ 依赖许可: `wx-downloader` 为 **MIT + Commons Clause**(禁止售卖该软件本身); 内部自用无碍。
+> ⚠️ 元宝/视频号接口非官方稳定 API, 上游变更时可能需升级 `wx-downloader`。
 
 ## v1.5.6 更新内容 (索引完整性修复)
 
@@ -168,8 +182,28 @@ Video2Text/
 
 - Python 3.11+
 - ffmpeg / ffprobe
-- 局域网内 Dell 工作站 (192.168.121.30:7860, SSH 用户: boothgianni)
+- 局域网内 Dell 工作站 (192.168.121.30, SSH 用户: boothgianni): Web :8137 + Whisper ASR :7860
 - 可选: 旁路由代理 (iStoreOS 192.168.121.44:7890) 用于翻墙
+- 微信视频号(通道F): `pip install wx-downloader`(需 Python 3.10+)
+
+## 微信视频号启用步骤 (一次性)
+
+```bash
+# 1) 安装 (Dell v2t_env 或任意环境)
+pip install wx-downloader
+
+# 2) 扫码登录腾讯元宝 (需有浏览器; 服务器无桌面时可在本机登录后拷贝凭据)
+wx-downloader login
+#    凭据落地: ~/.config/wx-channels/auth.json (0600)
+
+# 3) 验证
+wx-downloader status      # 期望 auth=已登录
+
+# 4) 使用: 本工具页面直接粘贴 https://weixin.qq.com/sph/... 即可
+```
+
+> 服务器无桌面环境的推荐做法: 在 Mac 上 `wx-downloader login` 扫码, 然后把
+> `~/.config/wx-channels/auth.json` 拷贝到 Dell 的 `/home/boothgianni/.config/wx-channels/`。
 
 ## License
 
