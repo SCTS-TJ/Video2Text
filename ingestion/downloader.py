@@ -166,6 +166,28 @@ def download_with_audio(url: str, progress_cb=None) -> dict:
     return vid_result
 
 
+def _extract_error(err_lines: list, output_lines: list) -> str:
+    """从 yt-dlp 输出里挑出最有价值的错误行。
+
+    旧实现直接丢弃 stderr, 上层只能看到 "unknown error"; 这里优先取真正的
+    `ERROR:` 行, 其次任何含 ERROR 的行, 最后兜底取末尾行, 保证报错可诊断。
+    """
+    for ln in reversed(err_lines):
+        if "ERROR:" in ln:
+            return ln.strip()
+    for ln in reversed(err_lines):
+        if "ERROR" in ln.upper():
+            return ln.strip()
+    for ln in reversed(output_lines):
+        if "ERROR" in ln.upper():
+            return ln.strip()
+    if err_lines:
+        return err_lines[-1].strip()
+    if output_lines:
+        return output_lines[-1].strip()
+    return "yt-dlp 失败 (无输出)"
+
+
 def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=None) -> dict:
     """执行 yt-dlp 并解析结果。支持进度回调 progress_cb(pct, speed_str)。"""
     env = {**os.environ}
@@ -187,7 +209,8 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
             text=True,
             env=env,
         )
-        output_lines = []
+        output_lines = []   # stdout; 进度模式下 stderr 已并入此处
+        err_lines = []      # stderr 留档: 失败时的真实原因在这里
         if progress_cb and proc.stdout:
             for line in proc.stdout:
                 line_stripped = line.strip()
@@ -203,9 +226,13 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
                             pass
             proc.wait(timeout=600)
         else:
-            stdout_data, _ = proc.communicate(timeout=600)
+            stdout_data, stderr_data = proc.communicate(timeout=600)
             if stdout_data:
                 output_lines = stdout_data.strip().splitlines()
+            # 关键修复: 旧代码用 "_" 丢弃 stderr, 使 yt-dlp 的 "ERROR: ..." 全部丢失,
+            # 上层只能笼统看到 "unknown error"。此处显式留档 stderr。
+            if stderr_data:
+                err_lines = stderr_data.strip().splitlines()
     except subprocess.TimeoutExpired:
         proc.kill()
         logger.warning("yt-dlp 超时 cmd=%s", cmd[:4])
@@ -214,18 +241,22 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
         logger.error("yt-dlp 异常 %s: %s", type(e).__name__, e)
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": f"{type(e).__name__}: {e}"}
 
+    # 进度模式下 stderr 并入 stdout, 从输出里再捞一遍 ERROR 行
+    if not err_lines:
+        err_lines = [ln for ln in output_lines if "ERROR" in ln.upper()]
+
     if proc.returncode != 0:
-        logger.warning("yt-dlp 失败 retcode=%s", proc.returncode)
-        err_msg = output_lines[-1] if output_lines else "unknown error"
+        err_msg = _extract_error(err_lines, output_lines)
+        logger.warning("yt-dlp 失败 retcode=%s error=%s", proc.returncode, err_msg)
         return {
             "ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode,
             "error": err_msg,
         }
 
-    # 从最后一行取文件路径
+    # 从最后一行取文件路径 (--print after_move:filepath 的输出)
     path = output_lines[-1].strip() if output_lines else ""
     if not path or not os.path.isfile(path):
-        path = _resolve_output(proc.stderr)  # 这里的 proc.stderr 可能是 None 或 pipe
+        path = _resolve_output("\n".join(output_lines + err_lines))
     if not path or not os.path.isfile(path):
         logger.warning("yt-dlp 完成后文件未找到 output=%s", output_lines[:5] if output_lines else "empty")
         return {"ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode, "error": "file not found after download"}

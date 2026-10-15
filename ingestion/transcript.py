@@ -8,6 +8,11 @@ from urllib.parse import parse_qs, urlparse
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, RequestBlocked
 
+try:  # v1.1+ 用构造参数 proxy_config 注入代理 (旧代码的 proxies= 会 TypeError)
+    from youtube_transcript_api.proxies import GenericProxyConfig
+except Exception:  # noqa: BLE001
+    GenericProxyConfig = None
+
 from .config import get_config
 
 
@@ -43,30 +48,31 @@ def fetch_youtube_transcript(url: str) -> dict:
         return {"ok": False, "text": "", "language": "", "source": "", "error": "invalid youtube url"}
 
     cfg = get_config()
-    proxies = {"http": cfg.http_proxy, "https": cfg.https_proxy} if cfg.http_proxy else None
 
     try:
-        api = YouTubeTranscriptApi(proxies=proxies) if proxies else YouTubeTranscriptApi()
+        # v1.2.x: 代理走构造参数 proxy_config (旧代码传 proxies= 在已装版本上直接 TypeError,
+        # 使通道A(YouTube字幕直取)静默失效, 每次都退回"下载+ASR")。
+        proxy_config = None
+        if cfg.http_proxy and GenericProxyConfig is not None:
+            proxy_config = GenericProxyConfig(http_url=cfg.http_proxy, https_url=cfg.https_proxy)
+        api = YouTubeTranscriptApi(proxy_config=proxy_config) if proxy_config else YouTubeTranscriptApi()
 
-        # 新版 API: fetch() 不接受 preserve_generated 参数
-        tr = api.fetch(video_id=vid)
-        source = "manual" if not getattr(getattr(tr, "snippets", [None])[0] if tr else None, "is_generated", True) else "auto"
+        # 语言候选: 不能只默认 ('en',), 否则纯中文视频永远匹配不到字幕。
+        tr = api.fetch(
+            video_id=vid,
+            languages=("zh-Hans", "zh-CN", "zh-Hant", "zh-TW", "zh", "en"),
+        )
+        snippets = list(tr)
 
-        # 判断来源: 检查第一个 snippet 是否自动生成
-        text = " ".join([s.text for s in tr])
+        text = " ".join(s.text for s in snippets)
         lang = ""
-        if tr:
-            first = tr[0] if tr else None
-            if first:
-                lang = getattr(first, "language_code", "") or ""
-                # 新版 API: 从 snippet 判断是否自动生成
-                try:
-                    from youtube_transcript_api.formatters import TextFormatter
-                    is_gen = getattr(first, "is_generated", None)
-                    if is_gen is not None:
-                        source = "auto" if is_gen else "manual"
-                except Exception:
-                    pass
+        source = "auto"
+        if snippets:
+            first = snippets[0]
+            lang = getattr(first, "language_code", "") or ""
+            is_gen = getattr(first, "is_generated", None)
+            if is_gen is not None:
+                source = "auto" if is_gen else "manual"
 
         return {"ok": True, "text": text, "language": lang, "source": source, "error": None}
 

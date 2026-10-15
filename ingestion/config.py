@@ -3,6 +3,27 @@ import os
 from dataclasses import dataclass
 
 
+def _default_node() -> str:
+    """探测 yt-dlp 的 JS 运行时 (用于解 YouTube n-challenge)。
+
+    旧实现硬编码 Mac 路径 /Users/giannibooth/.hermes/node/bin/node, 在 Linux
+    服务器(Dell/x79)上不存在 → n-challenge 求解失败。改为按平台探测。
+    """
+    env = os.getenv("V2T_JS_RUNTIME")
+    if env:
+        return env
+    for p in (
+        "/usr/bin/node",                                # Linux (Dell / x79)
+        "/usr/local/bin/node",
+        os.path.expanduser("~/.hermes/node/bin/node"),  # Mac mini 专用路径
+        "/opt/homebrew/bin/node",                       # Homebrew (Apple Silicon)
+        "/usr/local/opt/node/bin/node",
+    ):
+        if os.path.isfile(p):
+            return p
+    return "node"  # 兜底: 交给 PATH 解析
+
+
 @dataclass
 class Config:
     # 旁路由代理 (iStoreOS), 用于访问被墙站点
@@ -23,7 +44,7 @@ class Config:
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cookies.txt"
     )
     # Node.js 运行时路径, 用于 yt-dlp 解决 YouTube JS challenge
-    ytdlp_js_runtime: str = "/Users/giannibooth/.hermes/node/bin/node"
+    ytdlp_js_runtime: str = _default_node()
 
 
 _CONFIG: "Config | None" = None

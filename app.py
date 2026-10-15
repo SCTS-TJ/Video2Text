@@ -276,10 +276,10 @@ def _check_cancelled(task_id: str) -> bool:
     return False
 
 
-def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
+def _run_ingest_task(task_id: str, url: str, local_file: str = "", force_download: bool = False):
     """后台运行采集 + ASR, 完成后更新 tasks 字典"""
     try:
-        logger.info("任务开始 task_id=%s url=%s local_file=%s", task_id, url, local_file)
+        logger.info("任务开始 task_id=%s url=%s local_file=%s force_download=%s", task_id, url, local_file, force_download)
         if local_file:
             # ===== 离线模式: 跳过下载, 直接用已有文件 =====
             logger.info("离线模式 task_id=%s local_file=%s", task_id, local_file)
@@ -380,55 +380,17 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
         if _check_cancelled(task_id):
             return
 
-        # 下载进度监控: 后台线程轮询 downloads/ 目录大小, 实时计算速度和百分比
-        def _start_download_monitor():
-            import threading
-            stop_flag = threading.Event()
-            baseline = set(os.listdir(DOWNLOAD_DIR))
-            start_time = time.time()
-            last_size = 0
-            last_time = start_time
-            def _monitor():
-                nonlocal last_size, last_time
-                while not stop_flag.is_set():
-                    time.sleep(0.5)
-                    try:
-                        new_files = set(os.listdir(DOWNLOAD_DIR)) - baseline
-                        if not new_files:
-                            continue
-                        # 找最新文件
-                        newest = max(new_files, key=lambda f: os.path.getmtime(os.path.join(DOWNLOAD_DIR, f)))
-                        fpath = os.path.join(DOWNLOAD_DIR, newest)
-                        if not os.path.isfile(fpath):
-                            continue
-                        cur_size = os.path.getsize(fpath)
-                        now = time.time()
-                        dt = now - last_time
-                        if dt > 0.3:  # 每 0.3s 以上才更新
-                            # 计算速度
-                            speed = (cur_size - last_size) / dt
-                            if speed < 0: speed = 0
-                            speed_str = ""  # 留给前端格式化
-                            # 估算进度: 用文件大小占典型大小估算 (粗略)
-                            # 大多数视频 5-50MB, 用 50MB 做上限估算
-                            est_pct = min(95, int(cur_size / (50 * 1024 * 1024) * 100))
-                            with tasks_lock:
-                                tasks[task_id]["progress"] = est_pct
-                                tasks[task_id]["speed"] = f"{speed/1024/1024:.1f}MB/s" if speed > 1024*1024 else f"{speed/1024:.0f}KB/s"
-                            last_size = cur_size
-                            last_time = now
-                    except Exception:
-                        pass
-            t = threading.Thread(target=_monitor, daemon=True)
-            t.start()
-            return stop_flag
+        # 下载进度: 直接用 yt-dlp 的真实 percent/speed 回调 (取代旧的"文件大小估算"轮询)。
+        # 旧实现既不准确(硬编码 50MB 上限), 又因未传 progress_cb 而使 downloader 走
+        # stderr=PIPE 分支并丢弃 stderr, 导致下载失败只能笼统报 "unknown error"。
+        def _dl_progress(pct, speed):
+            with tasks_lock:
+                if task_id in tasks:
+                    tasks[task_id]["progress"] = max(5, min(95, int(pct)))
+                    if speed:
+                        tasks[task_id]["speed"] = speed
 
-        monitor_stop = _start_download_monitor()
-        result = ingest(url, transcribe=False)  # 先不转录, 只下载
-        if monitor_stop: monitor_stop.set()
-        # 下载完成后进度设为 100, 为转写做准备
-        with tasks_lock:
-            tasks[task_id]["progress"] = 95
+        result = ingest(url, transcribe=False, progress_cb=_dl_progress, force_download=force_download)  # 先不转录, 只下载
 
         if not result["ok"]:
             logger.warning("下载失败 task_id=%s error=%s", task_id, result.get("error"))
@@ -437,6 +399,10 @@ def _run_ingest_task(task_id: str, url: str, local_file: str = ""):
                 tasks[task_id]["error"] = result.get("error", "ingest failed")
                 tasks[task_id]["result"] = _build_payload(result, url)
             return
+
+        # 下载成功: 进度设为 95, 为后续转写做准备
+        with tasks_lock:
+            tasks[task_id]["progress"] = 95
 
         if _check_cancelled(task_id):
             return
@@ -556,7 +522,8 @@ def api_ingest(req: IngestReq) -> dict:
     source_desc = f"local_file={req.local_file}" if req.local_file else f"url={req.url}"
     logger.info("任务入队 task_id=%s %s force_download=%s", task_id, source_desc, req.force_download)
 
-    t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url), kwargs={"local_file": req.local_file}, daemon=True)
+    t = threading.Thread(target=_run_ingest_task, args=(task_id, req.url),
+                         kwargs={"local_file": req.local_file, "force_download": req.force_download}, daemon=True)
     t.start()
 
     return {"task_id": task_id, "status": "queued"}
