@@ -1,19 +1,20 @@
-"""微信视频号 (WeChat Channels / 视频号) 处理层。
+"""微信视频号 (WeChat Channels / 视频号) 处理层 — 通道F。
 
-背景与结论 (2026-10-15 实测于 Dell 192.168.121.30):
+背景 (2026-10-15 实测于 Dell 192.168.121.30):
   - yt-dlp 无 视频号 extractor, 只会落到 generic → `Unsupported URL`
-  - 分享短链 `weixin.qq.com/sph/*` 落地到
-    `channels.weixin.qq.com/finder-preview/pages/sph?id=...`,
-    该页是纯 SPA (2.6KB 壳), 页面与接口都不返回明文媒体地址
-  - 前端 bundle (`feed.*.js`) 用 **TEA** 解密视频流, 媒体为加密流
-  => 纯服务端 HTTP 抓取拿不到可下载的视频。
+  - 分享短链 `weixin.qq.com/sph/*` 落地页是纯 SPA(2.6KB 壳), 页面/接口均不返回明文媒体地址
+  - 前端 bundle 用 Isaac64 密钥流 XOR 解密(媒体为加密流, 仅前 128KB 加密)
 
-因此本模块只做两件"不解密"的事:
-  1. 精确识别 视频号 链接 (避免浪费一次必然失败的 yt-dlp 下载)
-  2. 返回结构化、可操作的引导 (走"离线模式"上传已下载文件)
+方案: 复用成熟开源工具 **wx-downloader** (PyPI, 纯 Python, 无需 MITM/根证书/微信客户端):
+  经腾讯元宝登录态解析分享链接 → 下载 → 内置解密 → 输出可播放 MP4。
 
-为何不在服务端实现下载/解密: 需要微信客户端会话 + 根证书中间人抓包,
-不适合 headless 服务器, 且高度不稳定、有 ToS 风险。详见交接文档 v1.5.5。
+本模块职责:
+  1. `is_weixin_channels()` 精确识别 视频号 链接
+  2. `download_weixin_video()` 调 wx-downloader 下载(通道F), 再抽 mp3 供 ASR
+  3. `handle_weixin_channels()` 失败时返回可操作引导(如提示 `wx-downloader login`)
+
+前置条件: 一次性 `wx-downloader login` 扫码登录元宝, 凭据 `~/.config/wx-channels/auth.json`。
+详见交接文档 v1.5.7。
 """
 import glob
 import os
