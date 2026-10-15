@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.5.9** — 修复健康灯点击无法展开详情（热区从 #svcTip 改为整个 #svcStatus）（历史 v1.5.8: 视频号健康灯）
+**v1.6.0** — 微信视频号**端到端打通**（真实链接实测通过）+ 登录态信号修正（历史 v1.5.9: 健康灯点击修复）
 
 ## 架构
 
@@ -111,6 +111,16 @@ Video2Text/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
 
+## v1.6.0 更新内容 (微信视频号端到端打通 ✅)
+
+- 🎉 **视频号真正可用（端到端实测通过）**：
+  `https://weixin.qq.com/sph/...` → wx-downloader 元宝解析 → 下载 → **Isaac64 解密** → ffmpeg 抽音频 → ASR 转写
+  - 实测产物经 `ffprobe` 验证为合法 **H.264 + AAC MP4**（39.75s / 1.8MB），转写文本正常
+- 🔐 **登录流程落地**：元宝凭据在 **Mac mini(192.168.121.31)** 用 Chrome 扫码生成，再拷到 Dell（见下节）
+- 🐛 **登录态信号修正**：旧失败记录**仅当晚于 `auth.json` 写入时间(mtime)** 才判为已过期
+  - 此前刚重新扫码登录后，健康灯会误报"登录可能已过期"（还留着登录前的失败记录）
+- 🚦 健康灯：`视频号 ● 已登录`
+
 ## v1.5.9 更新内容 (修复健康灯点击)
 
 - 🐛 **修复: 点击健康灯没反应(详情气泡打不开)**
@@ -202,24 +212,25 @@ Video2Text/
 - 可选: 旁路由代理 (iStoreOS 192.168.121.44:7890) 用于翻墙
 - 微信视频号(通道F): `pip install wx-downloader`(需 Python 3.10+)
 
-## 微信视频号启用步骤 (一次性)
+## 微信视频号启用步骤（已落地）
+
+**架构**：登录在有桌面的 **Mac mini(192.168.121.31)** 完成；下载/解密/转写在 **Dell(192.168.121.30)**。
 
 ```bash
-# 1) 安装 (Dell v2t_env 或任意环境)
-pip install wx-downloader
+# ── 一次性: 扫码登录（在 Mac mini 上, 需桌面 + Chrome）──
+export PATH="$HOME/.local/bin:$PATH"          # 未装 uv 时先: curl -LsSf https://astral.sh/uv/install.sh | sh
+uv tool install wx-downloader
+wx-downloader login                           # 弹 Chrome → 手机微信扫码登录腾讯元宝
+wx-downloader status                          # 期望 "已保存（服务端有效性将在下载时检查）"
 
-# 2) 扫码登录腾讯元宝 (需有浏览器; 服务器无桌面时可在本机登录后拷贝凭据)
-wx-downloader login
-#    凭据落地: ~/.config/wx-channels/auth.json (0600)
+# ── 把凭据拷到 Dell（Mac mini → Dell 免密已通）──
+scp ~/.config/wx-channels/auth.json boothgianni@192.168.121.30:/home/boothgianni/.config/wx-channels/
 
-# 3) 验证
-wx-downloader status      # 期望 auth=已登录
-
-# 4) 使用: 本工具页面直接粘贴 https://weixin.qq.com/sph/... 即可
+# ── 使用：页面直接粘贴 https://weixin.qq.com/sph/... ──
 ```
 
-> 服务器无桌面环境的推荐做法: 在 Mac 上 `wx-downloader login` 扫码, 然后把
-> `~/.config/wx-channels/auth.json` 拷贝到 Dell 的 `/home/boothgianni/.config/wx-channels/`。
+> ⚠️ Dell 上需 `pip install wx-downloader`（通道F 调用它，已装）。
+> ℹ️ 元宝凭据是**会话**（非永久）；失效后页面健康灯会变红提示"登录可能已过期"，重跑 `wx-downloader login` 即可。
 
 ## License
 
