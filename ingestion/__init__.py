@@ -9,6 +9,7 @@
 from .config import get_config
 from .downloader import download_media, download_with_audio
 from .transcript import fetch_youtube_transcript
+from .weixin_channels import is_weixin_channels, handle_weixin_channels
 from .asr import transcribe
 from .ingest import ingest
 
@@ -17,6 +18,8 @@ __all__ = [
     "download_media",
     "download_with_audio",
     "fetch_youtube_transcript",
+    "is_weixin_channels",
+    "handle_weixin_channels",
     "transcribe",
     "ingest",
 ]

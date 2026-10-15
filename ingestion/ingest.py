@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 
 from . import downloader, transcript
 from .bilibili_dl import download_bilibili
+from .weixin_channels import is_weixin_channels, handle_weixin_channels
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -140,6 +141,11 @@ def ingest(url: str, force_download: bool = False, transcribe: bool = True, prog
             return {**_as_download_result(dl), "error": asr_res["error"]}
         # Bilibili 下载失败, 回退到通用下载
         logger.warning("通道D下载失败, 回退到通用通道 error=%s", dl.get("error"))
+
+    if is_weixin_channels(url):
+        # 通道E: 视频号专用 —— 无 yt-dlp extractor 且媒体加密,
+        # 直接返回可操作引导, 不再浪费一次必然失败的下载。
+        return handle_weixin_channels(url)
 
     # 其他平台: 直接下载
     logger.info("通道C: 其他平台下载 url=%s", url)
