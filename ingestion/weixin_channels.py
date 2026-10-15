@@ -15,8 +15,16 @@
 为何不在服务端实现下载/解密: 需要微信客户端会话 + 根证书中间人抓包,
 不适合 headless 服务器, 且高度不稳定、有 ToS 风险。详见交接文档 v1.5.5。
 """
+import glob
+import os
+import shutil
+import subprocess
+import sys
+import uuid
 from urllib.parse import urlparse
 
+from .config import get_config
+from .downloader import extract_audio
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,10 +33,9 @@ logger = get_logger(__name__)
 _SPH_HOSTS = ("weixin.qq.com", "channels.weixin.qq.com")
 
 _HINT = (
-    "微信视频号暂不支持自动下载: 该平台视频为加密流(TEA)且无公开 API, "
-    "服务端无法直接抓取。可行做法: "
-    "① 用抓包/解析工具(如 res-downloader)先在电脑上保存该视频文件; "
-    "② 回到本页勾选「📁 离线模式」, 选择该文件进行转写。"
+    "微信视频号下载失败(未登录或解析失败)。请先在 Dell(192.168.121.30) 上以 boothgianni 运行 "
+    "`wx-downloader login` 扫码登录(凭据过期需重新登录); "
+    "或改走「📁 离线模式」上传已下载的视频文件。"
 )
 
 
@@ -46,9 +53,79 @@ def is_weixin_channels(url: str) -> bool:
     return False
 
 
-def handle_weixin_channels(url: str) -> dict:
-    """返回统一结构的结果: 不支持自动下载, 但给出可操作引导。"""
-    logger.info("微信视频号链接, 走专用引导(不调用 yt-dlp) url=%s", url)
+def _find_wxdl() -> str:
+    """定位 wx-downloader 可执行文件 (环境变量 > 当前 venv > PATH)。"""
+    cand = os.getenv("WX_DOWNLOADER_BIN")
+    if cand and os.path.isfile(cand):
+        return cand
+    cand = os.path.join(os.path.dirname(sys.executable), "wx-downloader")
+    if os.path.isfile(cand):
+        return cand
+    return "wx-downloader"
+
+
+def _direct_env() -> dict:
+    """构造子进程环境: 去除代理(元宝/微信 CDN 均为国内直连)。"""
+    env = dict(os.environ)
+    for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy",
+              "ALL_PROXY", "all_proxy"):
+        env.pop(k, None)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    return env
+
+
+def download_weixin_video(url: str, timeout: int = 900) -> dict:
+    """通道F: 用 wx-downloader 解析+下载+解密 视频号, 返回 ingest 结果结构。
+
+    wx-downloader 经腾讯元宝登录态解析分享链接 -> 下载 -> 内置解密 -> 输出可播放 MP4。
+    为避免依赖其 --json 的输出 schema, 这里用独立输出目录直接收集 *.mp4 产物。
+    """
+    cfg = get_config()
+    wxdl = _find_wxdl()
+    token = uuid.uuid4().hex[:8]
+    out_dir = os.path.join(cfg.download_dir, f"_wx_out_{token}")
+    cache_dir = os.path.join(cfg.download_dir, "_wx_cache")
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    cmd = [wxdl, "download", url, "--no-login", "--json", "-o", out_dir, "--cache-dir", cache_dir]
+    logger.info("通道F: wx-downloader 开始 url=%s", url)
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_direct_env())
+    except FileNotFoundError:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        return {"ok": False, "error": "未安装 wx-downloader (pip install wx-downloader)"}
+    except subprocess.TimeoutExpired:
+        shutil.rmtree(out_dir, ignore_errors=True)
+        logger.warning("通道F: wx-downloader 超时 url=%s", url)
+        return {"ok": False, "error": "wx-downloader 超时"}
+
+    mp4s = glob.glob(os.path.join(out_dir, "*.mp4"))
+    if p.returncode == 0 and mp4s:
+        src = max(mp4s, key=os.path.getmtime)
+        dst = os.path.join(cfg.download_dir, os.path.basename(src))
+        if os.path.exists(dst):  # 同名不覆盖
+            stem, ext = os.path.splitext(os.path.basename(src))
+            dst = os.path.join(cfg.download_dir, f"{stem}_{token}{ext}")
+        shutil.move(src, dst)
+        shutil.rmtree(out_dir, ignore_errors=True)
+        title = os.path.splitext(os.path.basename(dst))[0]
+        audio = extract_audio(dst)
+        logger.info("通道F: 下载成功 video=%s audio=%s", dst, audio or "(未提取)")
+        return {"ok": True, "path": audio or dst, "video_path": dst,
+                "title": title, "ext": "mp4", "mode": "video", "error": None}
+
+    shutil.rmtree(out_dir, ignore_errors=True)
+    err_lines = [ln for ln in (p.stderr or "").strip().splitlines() if ln.strip()]
+    msg = err_lines[-1] if err_lines else (p.stdout or "").strip()[:300] or "wx-downloader 失败"
+    logger.warning("通道F: 下载失败 rc=%s error=%s", p.returncode, msg)
+    return {"ok": False, "error": msg}
+
+
+def handle_weixin_channels(url: str, reason: str = "") -> dict:
+    """视频号下载失败时的统一兜底结果(含可操作引导)。"""
+    logger.info("微信视频号兜底引导 url=%s reason=%s", url, reason)
+    detail = f"{reason}\n{_HINT}" if reason else _HINT
     return {
         "channel": "download_video",
         "ok": False,
@@ -60,5 +137,5 @@ def handle_weixin_channels(url: str) -> dict:
         "mode": "video",
         "source": "",
         "language": "",
-        "error": _HINT,
+        "error": detail,
     }

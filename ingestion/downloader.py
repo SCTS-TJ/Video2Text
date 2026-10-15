@@ -166,6 +166,32 @@ def download_with_audio(url: str, progress_cb=None) -> dict:
     return vid_result
 
 
+def extract_audio(video_path: str, timeout: int = 600) -> str:
+    """从视频提取 mp3 (libmp3lame q:a 2), 返回音频路径; 失败返回 ""。
+
+    供 download_with_audio / 视频号通道F 复用。
+    """
+    base = os.path.splitext(video_path)[0]
+    audio_path = base + ".mp3"
+    if os.path.isfile(audio_path):
+        return audio_path
+    logger.info("ffmpeg提取音频 video=%s -> audio=%s", video_path, audio_path)
+    try:
+        subprocess.run(
+            [_FFMPEG, "-y", "-i", video_path, "-vn", "-acodec", "libmp3lame",
+             "-q:a", "2", audio_path],
+            capture_output=True, text=True, timeout=timeout,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ffmpeg提取异常 %s: %s", type(e).__name__, e)
+        return ""
+    if os.path.isfile(audio_path):
+        logger.info("ffmpeg提取完成 audio=%s", audio_path)
+        return audio_path
+    logger.warning("ffmpeg提取失败 audio=%s", audio_path)
+    return ""
+
+
 def _extract_error(err_lines: list, output_lines: list) -> str:
     """从 yt-dlp 输出里挑出最有价值的错误行。
 
