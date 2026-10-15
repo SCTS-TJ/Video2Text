@@ -59,11 +59,12 @@ def is_weixin_channels(url: str) -> bool:
 # ---- 运行期状态: 供 /api/health 提前暴露"视频号登录可能已过期" ----
 # 说明: 元宝凭据是会话 cookie(expires=-1), 本地无法判断服务端是否已失效,
 #       因此额外记录"最近一次下载结果"作为运行期信号。
-_STATUS: dict = {"attempt": None, "ok": None, "error": ""}
+_STATUS: dict = {"attempt": None, "ok": None, "error": "", "ts": 0.0}
 
 
 def _record(ok: bool, error: str = "") -> None:
     _STATUS["attempt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    _STATUS["ts"] = time.time()
     _STATUS["ok"] = ok
     _STATUS["error"] = (error or "")[:200]
 
@@ -124,12 +125,18 @@ def channel_f_status() -> dict:
         has_creds, cred_detail = False, "未安装 wx-downloader"
     ok = installed and has_creds
     detail = "未安装 wx-downloader" if not installed else cred_detail
-    # 运行期信号: 本地凭据在(has_creds), 但最近一次下载因登录失败
-    # → 说明服务端会话已失效, 即"可能已过期"。从未登录时保持"需扫码登录"。
+    # 运行期信号: 本地凭据在, 但"最近一次下载(晚于凭据写入)"因登录失败
+    # → 服务端会话可能已失效。若凭据文件比那次失败更新(如刚重新扫码登录),
+    #   则忽略旧失败, 避免刚登录就误报"已过期"。
     if installed and has_creds and _STATUS.get("ok") is False \
             and _is_login_error(_STATUS.get("error", "")):
-        ok = False
-        detail = "登录可能已过期, 请重扫 wx-downloader login"
+        try:
+            auth_mtime = os.path.getmtime(_auth_path())
+        except OSError:
+            auth_mtime = 0.0
+        if float(_STATUS.get("ts") or 0) > auth_mtime:
+            ok = False
+            detail = "登录可能已过期, 请重扫 wx-downloader login"
     return {
         "installed": installed,
         "logged_in": has_creds,
