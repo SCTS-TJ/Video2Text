@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.4.0** — 进度条实时速度 + SMB删除修复 + 源链接显示 + 黑屏修复
+**v1.5.4** — 系统体检修复: 下载错误可诊断 + 通道A(字幕直取)恢复 + 真实下载进度 + force_download 生效（历史 v1.4.0: 进度条实时速度 + SMB删除修复 + 源链接显示 + 黑屏修复）
 
 ## 架构
 
@@ -102,6 +102,19 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.5.4 更新内容 (系统体检修复)
+
+- 🩺 **下载失败可诊断**: `_run_ytdlp` 保留 stderr, 新增 `_extract_error()` 优先提取 `ERROR:` 行
+  - 之前任何下载失败都只报 `unknown error`, 现在返回真实原因(如 `ERROR: Unsupported URL: ...`)
+- ⚡ **真实下载进度**: 打通 `progress_cb`, 用 yt-dlp 的 percent/speed 回调
+  - 取代旧「文件大小 / 50MB」粗略估算; 前端可显示真实 MB/s
+- 🎯 **通道A(YouTube 字幕直取)恢复**:
+  - 适配 `youtube-transcript-api` 1.2.x (构造参数 `proxy_config`, 旧 `proxies=` 会 TypeError)
+  - `fetch(languages=["zh-Hans","zh-CN","zh-Hant","zh-TW","zh","en"])`, 中文视频不再漏字幕
+- 🔧 **force_download 打通**: `req.force_download` 全链路透传(此前 API/CLI 参数被忽略)
+- 🖥 **JS 运行时按平台探测**: `ytdlp_js_runtime` 不再硬编码 Mac 路径(Linux 命中 `/usr/bin/node`)
+- 🐛 **失败进度修正**: 下载失败的任务不再错误停在 95%
 
 ## v1.4.0 更新内容
 
