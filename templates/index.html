@@ -397,7 +397,7 @@ function _flashUrlClean(input){
 /* ---- 服务状态指示灯 ---- */
 function _svcDotClass(ok, degraded){ if(ok && !degraded) return "ok"; if(ok && degraded) return "warn"; return "bad"; }
 function _svcShort(svc){
-  const map = {video2text:"Web", asr:"ASR", ffmpeg:"ff", ffprobe:"ffp"};
+  const map = {video2text:"Web", asr:"ASR", ffmpeg:"ff", ffprobe:"ffp", wechat:"视频号"};
   return map[svc.name] || svc.name;
 }
 function renderServiceHealth(d){
@@ -417,7 +417,7 @@ function renderServiceHealth(d){
       return '<div class="row"><span class="n">'+s.label+'</span><span class="st '+cl+'">'+ (_svcDotClass(s.ok,s.degraded)==='ok'?'● ':(_svcDotClass(s.ok,s.degraded)==='warn'?'◐ ':'○ ')) + (s.detail||'') + (s.model?' · '+s.model:'') + '</span></div>';
     }).join('');
   }
-  const bad = svcs.filter(s=>!s.ok || s.degraded).length;
+  const bad = svcs.filter(s=>(!s.ok || s.degraded) && !s.optional).length;
   if(err) err.style.display = bad>0 ? '' : 'none';
   // 无数据(接口异常)时显示全灰
   if(!svcs.length && lights.firstChild==null) lights.innerHTML='<span class="svc-light"><span class="dot"></span>--</span>';

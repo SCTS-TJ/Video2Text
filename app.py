@@ -826,11 +826,25 @@ def api_health() -> dict:
         {"name": "ffmpeg", "label": "ffmpeg", "ok": ffmpeg_ok, "detail": ("正常" if ffmpeg_ok else "缺失")},
         {"name": "ffprobe", "label": "ffprobe", "ok": ffprobe_ok, "detail": ("正常" if ffprobe_ok else "缺失")},
     ]
+    # 视频号(通道F): 可选能力, 标记 optional 不参与 overall
+    # (未登录/未安装不该把整体健康判红; 仅在此单独亮灯并给出提示)
+    try:
+        from ingestion.weixin_channels import channel_f_status
+        f = channel_f_status()
+    except Exception as e:  # noqa: BLE001
+        f = {"ok": False, "detail": f"{type(e).__name__}: {e}",
+             "last_attempt": None, "last_error": "", "installed": False, "logged_in": False}
+    services.append({
+        "name": "wechat", "label": "视频号", "ok": bool(f.get("ok")),
+        "detail": f.get("detail"), "degraded": False, "optional": True,
+        "installed": f.get("installed"), "logged_in": f.get("logged_in"),
+        "last_attempt": f.get("last_attempt"), "last_error": f.get("last_error"),
+    })
     if forced:
         for svc in services:
             if forced == "all_fail": svc["ok"] = False
             elif forced == svc["name"]: svc["ok"] = False
-    overall = all(s.get("ok") for s in services)
+    overall = all(s.get("ok") for s in services if not s.get("optional"))
     return {"overall": overall, "services": services}
 
 

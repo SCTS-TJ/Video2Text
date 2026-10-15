@@ -17,10 +17,12 @@
 详见交接文档 v1.5.7。
 """
 import glob
+import json
 import os
 import shutil
 import subprocess
 import sys
+import time
 import uuid
 from urllib.parse import urlparse
 
@@ -52,6 +54,90 @@ def is_weixin_channels(url: str) -> bool:
     if host == "weixin.qq.com":
         return "/sph" in p.path.lower()
     return False
+
+
+# ---- 运行期状态: 供 /api/health 提前暴露"视频号登录可能已过期" ----
+# 说明: 元宝凭据是会话 cookie(expires=-1), 本地无法判断服务端是否已失效,
+#       因此额外记录"最近一次下载结果"作为运行期信号。
+_STATUS: dict = {"attempt": None, "ok": None, "error": ""}
+
+
+def _record(ok: bool, error: str = "") -> None:
+    _STATUS["attempt"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    _STATUS["ok"] = ok
+    _STATUS["error"] = (error or "")[:200]
+
+
+def _auth_path() -> str:
+    home = os.getenv("WX_CHANNELS_HOME") or os.path.expanduser("~/.config/wx-channels")
+    return os.path.join(home, "auth.json")
+
+
+def _wxdl_available() -> bool:
+    wxdl = _find_wxdl()
+    if os.path.isabs(wxdl):
+        return os.path.isfile(wxdl)
+    from shutil import which
+    return which(wxdl) is not None
+
+
+def _auth_status() -> tuple:
+    """本地元宝凭据检查: 优先委托 wx-downloader 自带逻辑, 不可用时本地兜底。"""
+    try:
+        from wx_channels_cli.auth import load_auth  # type: ignore
+    except Exception:
+        load_auth = None
+    if load_auth is not None:
+        try:
+            load_auth()
+            return True, "已登录"
+        except Exception:
+            return False, "需扫码登录"
+    path = _auth_path()
+    if not os.path.isfile(path):
+        return False, "需扫码登录"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return False, "凭据文件损坏"
+    now = time.time()
+    names = set()
+    for c in (data.get("cookies") or []):
+        dom = str(c.get("domain") or "").lstrip(".")
+        exp = c.get("expires", -1)
+        if dom.endswith("yuanbao.tencent.com") and (exp == -1 or exp > now) and c.get("value"):
+            names.add(c.get("name"))
+    return (True, "已登录") if {"hy_user", "hy_token"} <= names else (False, "需扫码登录")
+
+
+def _is_login_error(msg: str) -> bool:
+    return any(k in (msg or "") for k in ("元宝登录凭据", "wx-downloader login", "登录凭据"))
+
+
+def channel_f_status() -> dict:
+    """通道F(视频号)就绪状态, 供 /api/health 展示。"""
+    installed = _wxdl_available()
+    if installed:
+        has_creds, cred_detail = _auth_status()
+    else:
+        has_creds, cred_detail = False, "未安装 wx-downloader"
+    ok = installed and has_creds
+    detail = "未安装 wx-downloader" if not installed else cred_detail
+    # 运行期信号: 本地凭据在(has_creds), 但最近一次下载因登录失败
+    # → 说明服务端会话已失效, 即"可能已过期"。从未登录时保持"需扫码登录"。
+    if installed and has_creds and _STATUS.get("ok") is False \
+            and _is_login_error(_STATUS.get("error", "")):
+        ok = False
+        detail = "登录可能已过期, 请重扫 wx-downloader login"
+    return {
+        "installed": installed,
+        "logged_in": has_creds,
+        "ok": ok,
+        "detail": detail,
+        "last_attempt": _STATUS.get("attempt"),
+        "last_error": _STATUS.get("error", ""),
+    }
 
 
 def _find_wxdl() -> str:
@@ -95,10 +181,12 @@ def download_weixin_video(url: str, timeout: int = 900) -> dict:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_direct_env())
     except FileNotFoundError:
         shutil.rmtree(out_dir, ignore_errors=True)
+        _record(False, "未安装 wx-downloader")
         return {"ok": False, "error": "未安装 wx-downloader (pip install wx-downloader)"}
     except subprocess.TimeoutExpired:
         shutil.rmtree(out_dir, ignore_errors=True)
         logger.warning("通道F: wx-downloader 超时 url=%s", url)
+        _record(False, "wx-downloader 超时")
         return {"ok": False, "error": "wx-downloader 超时"}
 
     mp4s = glob.glob(os.path.join(out_dir, "*.mp4"))
@@ -113,6 +201,7 @@ def download_weixin_video(url: str, timeout: int = 900) -> dict:
         title = os.path.splitext(os.path.basename(dst))[0]
         audio = extract_audio(dst)
         logger.info("通道F: 下载成功 video=%s audio=%s", dst, audio or "(未提取)")
+        _record(True)
         return {"ok": True, "path": audio or dst, "video_path": dst,
                 "title": title, "ext": "mp4", "mode": "video", "error": None}
 
@@ -120,6 +209,7 @@ def download_weixin_video(url: str, timeout: int = 900) -> dict:
     err_lines = [ln for ln in (p.stderr or "").strip().splitlines() if ln.strip()]
     msg = err_lines[-1] if err_lines else (p.stdout or "").strip()[:300] or "wx-downloader 失败"
     logger.warning("通道F: 下载失败 rc=%s error=%s", p.returncode, msg)
+    _record(False, msg)
     return {"ok": False, "error": msg}
 
 
