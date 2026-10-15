@@ -340,7 +340,7 @@
       </div>
       <div class="tools">
         <button class="primary" id="copy">📋 复制</button>
-        <button id="exp-txt">📄 导出 TXT</button>
+        <button id="exp-txt">📋 复制(带时间戳)</button>
         <button id="exp-md">📝 导出 MD</button>
       </div>
       <div class="progress-wrap" id="progressWrap" style="display:none">
@@ -912,20 +912,47 @@ function escHtml(str){
   return d.innerHTML;
 }
 
+// 复制到剪贴板: 优先 Clipboard API(仅安全上下文 https/localhost 可用);
+// 经 http:// 局域网访问时 navigator.clipboard 未定义 → 回退 execCommand。
+function copyText(text){
+  if(navigator.clipboard && window.isSecureContext){
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      ok ? resolve() : reject(new Error("execCommand copy failed"));
+    }catch(err){ reject(err); }
+  });
+}
+
 $("copy").onclick = () => {
   if(!lastText){ setStatus("暂无文字", "err"); return; }
-  navigator.clipboard.writeText(lastText)
+  copyText(lastText)
     .then(() => setStatus("\u2705 已复制", "ok"))
     .catch(() => setStatus("复制失败", "err"));
 };
 
+// 「导出 TXT」已改为「复制(带时间戳)」: 内容不变(有分段则带时间戳), 只是改为复制而非下载文件
 $("exp-txt").onclick = () => {
   if(!lastText){ setStatus("暂无文字", "err"); return; }
   let content = lastText;
   if(lastSegments && lastSegments.length){
     content = lastSegments.map(s => `[${formatTime(s.start)}] ${s.text}`).join("\n");
   }
-  download(content, "transcript.txt", "text/plain");
+  copyText(content)
+    .then(() => setStatus("\u2705 已复制(带时间戳)", "ok"))
+    .catch(() => setStatus("复制失败", "err"));
 };
 
 $("exp-md").onclick = () => {
