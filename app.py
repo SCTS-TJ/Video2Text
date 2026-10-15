@@ -122,6 +122,11 @@ def _index_entry(result: dict, url: str = "") -> None:
     # 取音频文件名作为 key
     audio_path = result.get("path") or ""
     name = os.path.basename(audio_path)
+    if not name:
+        # 无本地媒体文件的结果(如通道A YouTube 字幕直取, path=""): 无文件名可作索引 key。
+        # 若不拦截会写入 key 为 "" 的垃圾条目(且每次覆盖)。文本已由 _save_transcript 落盘。
+        logger.info("跳过索引: 无本地媒体文件 url=%s", url)
+        return
 
     # file_url
     file_url = ""
