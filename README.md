@@ -2,18 +2,23 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.5.4** — 系统体检修复: 下载错误可诊断 + 通道A(字幕直取)恢复 + 真实下载进度 + force_download 生效（历史 v1.4.0: 进度条实时速度 + SMB删除修复 + 源链接显示 + 黑屏修复）
+**v1.5.5** — 平台支持修复: YouTube 下载 403 修复(yt-dlp 升级) + 微信视频号专用引导（历史 v1.5.4: 系统体检修复）
 
 ## 架构
 
 ```
-┌── Mac mini (M2) ────────────────────────┐     ┌── Dell 工作站 (RTX 3090) ──┐
-│  Web 服务 :8137                          │     │  Whisper-ASR :7860         │
-│  yt-dlp / bilibili-api 下载              │────→│  large-v3-turbo GPU 转写   │
-│  ffprobe 读时长                          │     │  (加 LD_LIBRARY_PATH 修复) │
-│  结构化日志 → /Volumes/Studio_IT_Dev/    │     └────────────────────────────┘
-│  前端界面 (字幕同步高亮)                  │
-└─────────────────────────────────────────┘
+┌── Dell 工作站 (192.168.121.30) = 逻辑控制 + 采集 + ASR ───────┐
+│  video2text.service         Web 界面 + 采集 API      :8137      │
+│  whisper-asr-dell.service   Whisper ASR (medium)     :7860      │
+│  yt-dlp / bilibili-api 下载 · ffmpeg/ffprobe 提音频             │
+│  结构化日志 → Agent_Workspace/Video2Text/logs/                  │
+└─────────────────────────────────────────────────────────────────┘
+        ▲ 浏览器访问                          ▲ 翻墙
+┌── Mac mini (本机) ──────────────┐   ┌── iStoreOS 旁路由 ────────┐
+│  http://192.168.121.30:8137      │   │  192.168.121.44:7890      │
+└──────────────────────────────────┘   └───────────────────────────┘
+
+> x79 (192.168.121.99:7860) 另有一份 Whisper ASR 备用实例; 当前服务用本机 30 的实例。
 ```
 
 ## 快速开始
@@ -44,8 +49,9 @@ open http://localhost:8137
 | 平台 | 方式 | 说明 |
 |------|------|------|
 | **YouTube** + 有字幕 | 通道A — 字幕直取 | youtube-transcript-api, 零下载 |
-| **YouTube** + 无字幕 | 通道B — 下载+ASR | yt-dlp + Dell 3090 转写 |
+| **YouTube** + 无字幕 | 通道B — 下载+ASR | yt-dlp + Dell ASR 转写 |
 | **Bilibili** | 通道D — API 直连 | 绕过 WAF 412, Python requests 直接调 B站 API |
+| **微信视频号** | 通道E — 专用引导 | 无公开 API + 媒体 TEA 加密, 服务端不支持; 引导走「离线模式」 |
 | 其他平台 | 通道C — 通用下载 | yt-dlp + 旁路由代理 |
 
 ### CLI
@@ -76,8 +82,9 @@ tail -f /Volumes/Studio_IT_Dev/Video2Text/video2text.log
 ```
 URL 输入
   ├─ YouTube + 有字幕 → [通道A] 字幕直取 (零下载)
-  ├─ YouTube + 无字幕 → [通道B] 下载 → Dell 3090 ASR
+  ├─ YouTube + 无字幕 → [通道B] 下载 → ASR
   ├─ Bilibili         → [通道D] Bilibili API 直连 → 下载 → ASR
+  ├─ 微信视频号        → [通道E] 专用引导 (不支持自动下载, 提示走离线模式)
   └─ 其他平台         → [通道C] yt-dlp 下载 → ASR
 
 转写完成后自动保存到 transcripts/ 目录 (.txt + .md 双格式)
@@ -92,16 +99,27 @@ Video2Text/
 ├── run.sh                # 启动/停止脚本
 ├── ingestion/
 │   ├── config.py         # 代理/路径配置
-│   ├── ingest.py         # 四通道采集路由
+│   ├── ingest.py         # 五通道采集路由 (A/B/C/D/E)
 │   ├── downloader.py     # yt-dlp 下载 (含国内站点代理跳过)
 │   ├── bilibili_dl.py    # Bilibili API 直连下载器 (绕 WAF)
+│   ├── weixin_channels.py# 微信视频号识别 + 引导 (通道E)
 │   ├── transcript.py     # YouTube 字幕直取
-│   ├── asr.py            # ASR 转写 (Dell 3090 + 三级分段)
+│   ├── asr.py            # ASR 转写 (GPU + 三级分段)
 │   ├── index.py          # 转写索引管理
 │   └── logger.py         # 结构化日志配置
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.5.5 更新内容 (平台支持修复)
+
+- ✅ **YouTube 下载 403 修复**: yt-dlp 升级 `2026.07.04 → 2026.08.19`
+  - 旧版对 YouTube 新兴 SABR/PO-token 流处理不周, 实测下载报 `HTTP Error 403: Forbidden`; 升级后实测下载 243MB 4K 视频成功
+  - cookies 无需更换(实测原 cookies 可用)
+- 🧭 **微信视频号专用引导 (通道E)**:
+  - 视频号视频为 TEA 加密流 + 无公开 API, 服务端无法自动下载
+  - 新增 `ingestion/weixin_channels.py`: 精确识别视频号链接, 不再浪费一次必然失败的 yt-dlp 调用
+  - 返回可操作提示: 用抓包/解析工具保存文件 → 本页勾选「📁 离线模式」转写
 
 ## v1.5.4 更新内容 (系统体检修复)
 
