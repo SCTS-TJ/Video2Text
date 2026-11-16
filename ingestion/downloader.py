@@ -192,6 +192,26 @@ def extract_audio(video_path: str, timeout: int = 600) -> str:
     return ""
 
 
+# YouTube 风控提示: "Sign in to confirm you're not a bot" 的真实原因通常是
+# 出口 IP 被判定为数据中心/代理 IP(实测本网出口为 Oracle 云机房 152.67.214.202)。
+# 与 cookies 无关(实测 cookies 有效、未过期), yt-dlp 各 player_client / PO Token 均无法绕过。
+_YT_BOT_HINT = (
+    "  [诊断] 该错误通常是出口 IP 被 YouTube 判定为数据中心/代理 IP 所致"
+    "(本网实际出口为 Oracle 云机房), 与 cookies 无关。"
+    "yt-dlp 的 --cookies / player_client / PO Token 均无法绕过, "
+    "需改用住宅出口节点或换代理线路。"
+)
+
+
+def _augment_error(err_msg: str) -> str:
+    """给已知的 YouTube 风控错误补上可操作的诊断提示。"""
+    low = (err_msg or "").lower()
+    if "not a bot" in low or "sign in to confirm" in low:
+        first = (err_msg or "").splitlines()[0].strip()
+        return first + "\n" + _YT_BOT_HINT
+    return err_msg
+
+
 def _extract_error(err_lines: list, output_lines: list) -> str:
     """从 yt-dlp 输出里挑出最有价值的错误行。
 
@@ -272,7 +292,7 @@ def _run_ytdlp(cmd: list, mode: str, skip_proxy_env: bool = False, progress_cb=N
         err_lines = [ln for ln in output_lines if "ERROR" in ln.upper()]
 
     if proc.returncode != 0:
-        err_msg = _extract_error(err_lines, output_lines)
+        err_msg = _augment_error(_extract_error(err_lines, output_lines))
         logger.warning("yt-dlp 失败 retcode=%s error=%s", proc.returncode, err_msg)
         return {
             "ok": False, "path": "", "video_path": "", "title": "", "ext": "", "mode": mode,
