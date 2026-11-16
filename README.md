@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.6.1** — 「导出 TXT」改为「复制(带时间戳)」+ 修复 http 下剪贴板不可用（历史 v1.6.0: 视频号端到端打通）
+**v1.6.2** — YouTube「not a bot」风控：补可操作诊断提示 + 根因定位为**数据中心出口 IP**（历史 v1.6.1: 复制按钮改造）
 
 ## 架构
 
@@ -110,6 +110,23 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.6.2 更新内容 (YouTube 风控诊断)
+
+- 🩺 **`Sign in to confirm you're not a bot` 现在附带可操作诊断**（不再只回显 yt-dlp 原文）
+- **根因（2026-11-16 实测）**：**本网出口 IP 是数据中心 IP** —— `152.67.214.202` = **Oracle Cloud 韩国机房**（整条宽带的公网出口），YouTube 对机房 IP 做针对性风控
+- **已逐项排除**（都不是原因）：
+
+  | 检查项 | 结论 |
+  |---|---|
+  | cookies | ✅ **有效且未过期**（带其访问订阅页返回 200；SID/SAPISID 等 2027-08 到期） |
+  | JS 运行时 | ✅ node 正常求解 n-challenge |
+  | player_client | ❌ 试了 11 种，全部 `LOGIN_REQUIRED` |
+  | PO Token provider | ❌ 已装 bgutil 2.0.2（能出 token），但流程走不到该步；官方亦说明 PO Token **无法**绕过基于 IP 的登录限制 |
+  | 直连 | ❌ 被墙，必须走代理（出口正是该机房 IP） |
+  | 影响面 | 多数视频失败（Gangnam/Despacito…），少数仍可（dQw4w9WgXcQ） |
+
+- **真正的解法**：把 YouTube 的出口换成**住宅/干净 IP**（换代理线路或加分流规则）—— 非代码可解
 
 ## v1.6.1 更新内容 (复制按钮改造)
 
