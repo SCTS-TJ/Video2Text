@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.6.2** — YouTube「not a bot」风控：补可操作诊断提示 + 根因定位为**数据中心出口 IP**（历史 v1.6.1: 复制按钮改造）
+**v1.6.3** — YouTube 专用出口开关 `V2T_YT_PROXY`（换住宅出口时填一个环境变量即可）；核实旁路由**无可用的非机房出口**（历史 v1.6.2: 风控诊断）
 
 ## 架构
 
@@ -110,6 +110,21 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.6.3 更新内容 (YouTube 专用出口开关)
+
+- 🔀 **新增环境变量 `V2T_YT_PROXY`**：给 YouTube 单独指定出口代理（**留空 = 沿用默认旁路由代理**）
+  - 将来换到住宅/干净出口时，**只需填一个环境变量、无需改代码**：
+    ```bash
+    sudo systemctl edit video2text        # 或改 /etc/systemd/system/video2text.service
+    #   [Service]
+    #   Environment=V2T_YT_PROXY=http://<host>:<port>
+    sudo systemctl restart video2text
+    ```
+- 📋 **旁路由实测核实（2026-11-16）**：PassWall 的 3 个落地**全部是 Oracle 云机房**
+  （韩春川 `152.67.214.202` / 美圣何塞 `155.248.214.183` / hdd1t 链）；实测切到美国节点后**出口仍是韩国那个 IP**
+  ⇒ **现有基础设施里没有"住宅/干净出口"可用**
+- 🧹 **已卸载**排障中安装的 bgutil PO Token provider（Docker 容器 + 镜像 + pip 插件）—— 实测对本问题无效
 
 ## v1.6.2 更新内容 (YouTube 风控诊断)
 
