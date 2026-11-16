@@ -41,6 +41,8 @@ def _isfile_retry(path: str, retries: int = 5, delay: float = 0.5) -> bool:
     return False
 
 ASR_URL = os.getenv("ASR_URL", "http://192.168.121.30:7860/transcribe")
+# 备用 ASR 端点: 本机 GPU 被占(CUDA OOM, 如 ComfyUI 占满显存)时自动回退
+ASR_FALLBACK_URL = os.getenv("ASR_FALLBACK_URL", "")
 FFPROBE = os.getenv("FFPROBE", "/usr/bin/ffprobe" if os.path.isfile("/usr/bin/ffprobe") else "/opt/homebrew/bin/ffprobe")
 _NO_PROXY = {"http": None, "https": None}
 
@@ -171,13 +173,8 @@ def _estimate_segments(text: str, duration: float) -> list:
     return segs
 
 
-def transcribe(
-    audio_path: str,
-    model: str = "large-v3-turbo",
-    language: str = "zh",
-    timeout: int = 1800,
-) -> dict:
-    """转写音频: Dell 3090 唯一解码 + ffprobe 真实时长 + 三级切分。"""
+def _transcribe_one(url: str, audio_path: str, language: str, timeout: int) -> dict:
+    """向单个 ASR 端点发起转写 + 解析 (内部用)。"""
     if not _isfile_retry(audio_path):
         return {"ok": False, "text": "", "segments": [], "duration": 0, "language": "",
                 "error": f"audio not found: {audio_path}"}
@@ -188,10 +185,10 @@ def transcribe(
 
     try:
         with open(audio_path, "rb") as f:
-            r = requests.post(ASR_URL, files={"file": (os.path.basename(audio_path), f)},
+            r = requests.post(url, files={"file": (os.path.basename(audio_path), f)},
                             data={"language": language}, timeout=timeout, proxies=_NO_PROXY)
         if r.status_code != 200:
-            logger.warning("ASR HTTP错误 status=%s url=%s", r.status_code, ASR_URL)
+            logger.warning("ASR HTTP错误 status=%s url=%s", r.status_code, url)
             return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                     "error": f"Dell ASR http {r.status_code}"}
         dell = r.json()
@@ -233,10 +230,37 @@ def transcribe(
             "duration": dur, "language": lang, "error": None,
         }
     except requests.Timeout:
-        logger.warning("ASR超时 timeout=%ss url=%s", timeout, ASR_URL)
+        logger.warning("ASR超时 timeout=%ss url=%s", timeout, url)
         return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                 "error": "Dell ASR timeout"}
     except Exception as e:
         logger.error("ASR异常 %s: %s", type(e).__name__, e, exc_info=True)
         return {"ok": False, "text": "", "segments": [], "duration": real_duration, "language": "",
                 "error": f"{type(e).__name__}: {e}"}
+
+
+def transcribe(
+    audio_path: str,
+    model: str = "large-v3-turbo",
+    language: str = "zh",
+    timeout: int = 1800,
+) -> dict:
+    """转写音频: 主端点(本机 3090) + 失败时自动回退备用端点。
+
+    回退场景: 本机 GPU 被其它任务占满(如 ComfyUI) → whisper 报
+    `CUDA failed with error out of memory`。此时自动切到
+    ASR_FALLBACK_URL(如 x79 的 whisper 实例), 任务不再整体失败。
+    """
+    res = _transcribe_one(ASR_URL, audio_path, language, timeout)
+    if res.get("ok"):
+        return res
+    if ASR_FALLBACK_URL:
+        logger.warning("主 ASR 失败(%s), 回退备用端点 %s", res.get("error"), ASR_FALLBACK_URL)
+        fb = _transcribe_one(ASR_FALLBACK_URL, audio_path, language, timeout)
+        if fb.get("ok"):
+            logger.info("备用 ASR 转写成功 text_len=%d", len(fb.get("text", "")))
+            return fb
+        logger.warning("备用 ASR 也失败: %s", fb.get("error"))
+        # 两个都失败: 返回更具体的那个错误(优先主端点的)
+        return res
+    return res

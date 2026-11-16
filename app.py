@@ -840,6 +840,23 @@ def api_health() -> dict:
         "installed": f.get("installed"), "logged_in": f.get("logged_in"),
         "last_attempt": f.get("last_attempt"), "last_error": f.get("last_error"),
     })
+    # YouTube 中转链 (澳洲住宅出口): 仅在配置了 V2T_YT_PROXY 时才显示
+    if os.getenv("V2T_YT_PROXY"):
+        import socket as _socket
+
+        def _probe_yt_chain() -> bool:
+            try:
+                with _socket.create_connection(("127.0.0.1", 11080), timeout=2):
+                    return True
+            except OSError:
+                return False
+
+        _ytc = _probe_yt_chain()
+        services.append({
+            "name": "ytchain", "label": "YouTube链", "ok": _ytc, "optional": True,
+            "degraded": False,
+            "detail": ("正常(澳洲住宅出口)" if _ytc else "未就绪(检查 v2t-yt-chain 服务)"),
+        })
     if forced:
         for svc in services:
             if forced == "all_fail": svc["ok"] = False

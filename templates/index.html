@@ -400,7 +400,7 @@ function _flashUrlClean(input){
 /* ---- 服务状态指示灯 ---- */
 function _svcDotClass(ok, degraded){ if(ok && !degraded) return "ok"; if(ok && degraded) return "warn"; return "bad"; }
 function _svcShort(svc){
-  const map = {video2text:"Web", asr:"ASR", ffmpeg:"ff", ffprobe:"ffp", wechat:"视频号"};
+  const map = {video2text:"Web", asr:"ASR", ffmpeg:"ff", ffprobe:"ffp", wechat:"视频号", ytchain:"YT链"};
   return map[svc.name] || svc.name;
 }
 function renderServiceHealth(d){
