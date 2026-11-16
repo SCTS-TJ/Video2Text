@@ -46,6 +46,12 @@ class Config:
     # Node.js 运行时路径, 用于 yt-dlp 解决 YouTube JS challenge
     ytdlp_js_runtime: str = _default_node()
 
+    # YouTube 专用代理 (留空 = 用默认旁路由代理)。
+    # 背景: 本网默认出口为数据中心 IP(Oracle 云机房), YouTube 会据此判 bot
+    # ("Sign in to confirm you're not a bot")。定位到住宅/干净出口后, 设为
+    # 形如 http://host:port 即可让 YouTube 单独走该线路, 无需改代码。
+    yt_proxy: str = os.getenv("V2T_YT_PROXY", "")
+
 
 _CONFIG: "Config | None" = None
 
@@ -58,6 +64,7 @@ def get_config() -> Config:
             https_proxy=os.getenv("HTTPS_PROXY", Config.https_proxy),
             download_dir=os.getenv("V2T_DOWNLOAD_DIR", Config.download_dir),
             ffmpeg_location=os.getenv("FFMPEG_LOCATION", Config.ffmpeg_location),
+            yt_proxy=os.getenv("V2T_YT_PROXY", ""),
         )
         os.makedirs(_CONFIG.download_dir, exist_ok=True)
     return _CONFIG

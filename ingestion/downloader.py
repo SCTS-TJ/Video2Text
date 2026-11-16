@@ -83,11 +83,21 @@ def download_media(url: str, audio_only: bool = False, progress_cb=None) -> dict
 
     # 判断是否国内站点
     is_cn = _is_chinese_site(url)
+    is_yt = ("youtube" in url) or ("youtu.be" in url)
+
+    # YouTube 专用代理优先(若配置): 默认出口为机房 IP 会被 YouTube 判 bot,
+    # 定位到住宅/干净出口后设 V2T_YT_PROXY 即可单独切换, 无需改代码。
+    if is_yt and cfg.yt_proxy:
+        site_proxy = cfg.yt_proxy
+    else:
+        site_proxy = cfg.http_proxy
 
     # 国内站点不走代理, 海外站点走旁路由代理
     cmd = [_YTDLP, "--no-playlist", "--restrict-filenames"]
     if not is_cn:
-        cmd += ["--proxy", cfg.http_proxy]
+        cmd += ["--proxy", site_proxy]
+        if is_yt and cfg.yt_proxy:
+            logger.info("YouTube 使用专用代理 url=%s proxy=%s", url, site_proxy)
     else:
         logger.info("国内站点, 跳过代理 url=%s", url)
 
