@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.6.3** — YouTube 专用出口开关 `V2T_YT_PROXY`（换住宅出口时填一个环境变量即可）；核实旁路由**无可用的非机房出口**（历史 v1.6.2: 风控诊断）
+**v1.7.0** — **YouTube 修复**：走澳洲住宅出口（SSH 跳板链 Dell→韩国VPS→hdd1t）绕过 bot 检查 + ASR 备用端点自动回退（历史 v1.6.3: 专用出口开关）
 
 ## 架构
 
@@ -110,6 +110,33 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.7.0 更新内容 (YouTube 修复 ✅)
+
+### 问题
+本网公网出口是**数据中心 IP**（Oracle 韩国机房 `152.67.214.202`），YouTube 对 yt-dlp 一律判 bot（`Sign in to confirm you're not a bot`）。
+已逐项排除（均实测）：11 种 `player_client`、自造并注入 PO Token（player+gvs）、TLS 指纹伪装（`curl_cffi --impersonate`）、cookies（有效且未过期）、yt-dlp 升级到最新。
+
+### 解法：走澳洲住宅出口，用 SSH 跳板链解决跨境限速
+```
+Dell ──SSH(中国→韩国, 快)──▶ 韩国VPS 152.67.214.202 ──SSH──▶ hdd1t(澳洲住宅) ──▶ YouTube
+                                                        出口 = 114.76.214.20 (悉尼 / Telstra)
+```
+- 直连澳洲仅 **~4KB/s**（跨境限速）；经韩国中转后 **~600KB/s**
+- **只用 22 端口**，不占用任何云端口（两台 VPS 的云防火墙只放行 80/443）
+
+### 落地清单
+| 组件 | 位置 / 值 |
+|---|---|
+| `v2t-yt-chain.service`（Dell systemd） | `ssh -N -D 127.0.0.1:11080 -J opc@152.67.214.202 root@114.76.214.20` |
+| `V2T_YT_PROXY`（video2text drop-in） | `socks5h://127.0.0.1:11080` |
+| `ASR_FALLBACK_URL`（video2text drop-in） | `http://192.168.121.99:7860/transcribe` |
+
+### 配套修复：ASR 自动回退
+本机 GPU 与 ComfyUI 共享。ComfyUI 占满显存时 whisper 会 `CUDA OOM` → 现在**自动回退到 x79 的 whisper**，任务不再整体失败。
+
+### 健康灯
+页头新增 **`YT链`**（optional）：探测本地中转链是否就绪（链断会变红提示）。
 
 ## v1.6.3 更新内容 (YouTube 专用出口开关)
 
