@@ -135,6 +135,35 @@
   .offline-bar select:focus{border-color:var(--accent)}
   .offline-bar select:disabled{opacity:.4;cursor:not-allowed}
   .offline-bar .hint{font-size:11px;color:var(--sub);white-space:nowrap}
+  /* ---- 多选文件下拉框(批量操作) ---- */
+  .ms-wrap{position:relative;display:inline-block;min-width:300px;max-width:420px}
+  .ms-btn{
+    width:100%;text-align:left;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:7px 10px;font-size:13px;cursor:pointer;
+    display:flex;justify-content:space-between;align-items:center;gap:8px;
+  }
+  .ms-btn:disabled{opacity:.5;cursor:not-allowed}
+  .ms-btn:hover:not(:disabled){border-color:var(--accent)}
+  .ms-btn .ms-caret{color:var(--sub);flex-shrink:0}
+  .ms-btn #msLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ms-panel{
+    position:absolute;top:calc(100% + 6px);left:0;z-index:900;min-width:100%;
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 10px 30px rgba(0,0,0,.5);padding:8px;
+    display:flex;flex-direction:column;gap:6px;
+  }
+  .ms-head{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--sub);padding:2px 4px}
+  .ms-head label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--txt)}
+  .ms-head input{accent-color:var(--danger);cursor:pointer}
+  .ms-list{overflow:auto;max-height:220px;display:flex;flex-direction:column;gap:2px}
+  .ms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:12px;color:var(--txt);cursor:pointer}
+  .ms-item:hover{background:var(--panel2)}
+  .ms-item input{accent-color:var(--danger);cursor:pointer;flex-shrink:0}
+  .ms-item .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ms-foot{display:flex;justify-content:flex-end;border-top:1px solid var(--line);padding-top:6px}
+  .ms-del{background:var(--danger);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer}
+  .ms-del:disabled{opacity:.4;cursor:not-allowed}
+  .ms-del:hover:not(:disabled){opacity:.88}
   .offline-bar .selected-file{
     flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     font-size:12px;color:var(--txt);padding:0 4px;
@@ -328,9 +357,24 @@
   <!-- 离线模式 -->
   <div class="offline-bar">
     <label><input type="checkbox" id="offlineToggle" onchange="toggleOffline()"> 📁 离线模式</label>
-    <select id="fileSelect" disabled onchange="onFileSelect()">
+    <select id="fileSelect" disabled onchange="onFileSelect()" style="display:none">
       <option value="">— 选择已有视频文件 —</option>
     </select>
+    <div class="ms-wrap" id="msWrap">
+      <button type="button" class="ms-btn" id="msBtn" disabled onclick="toggleMs(event)">
+        <span id="msLabel">— 选择已有视频文件 —</span><span class="ms-caret">▾</span>
+      </button>
+      <div class="ms-panel" id="msPanel" style="display:none">
+        <div class="ms-head">
+          <label><input type="checkbox" id="msAll" onchange="msToggleAll(this.checked)" /> 全选</label>
+          <span id="msCount">已选 0 个</span>
+        </div>
+        <div class="ms-list" id="msList"></div>
+        <div class="ms-foot">
+          <button type="button" class="ms-del" id="msDelBtn" disabled onclick="showBulkDeleteModal()">🗑️ 删除选中</button>
+        </div>
+      </div>
+    </div>
     <button id="renameBtn" class="rename-btn" disabled onclick="showRenameModal()" title="重命名文件">✏️</button>
     <button id="deleteBtn" class="delete-btn" disabled onclick="showDeleteModal()" title="删除文件">🗑️</button>
     <span class="selected-file" id="selectedFile"></span>
@@ -1080,6 +1124,7 @@ async function checkExistingTranscript(fileName){
 async function toggleOffline(){
   const on = $("offlineToggle").checked;
   $("fileSelect").disabled = !on;
+  if($("msBtn")) $("msBtn").disabled = !on;
   $("urlInput").disabled = on;
   $("offlineHint").textContent = on ? "选择已有文件直接 ASR 转写，无需下载" : "跳过下载，直接用已有文件测试";
   if(!on) $("selectedFile").textContent = "";
@@ -1088,6 +1133,9 @@ async function toggleOffline(){
   } else {
     $("renameBtn").disabled = true;
     $("deleteBtn").disabled = true;
+    if($("msBtn")) $("msBtn").disabled = true;
+    if($("msPanel")) $("msPanel").style.display = "none";
+    if($("msDelBtn")) $("msDelBtn").disabled = true;
   }
 }
 
@@ -1277,13 +1325,96 @@ function loadFileList2(){
   fetch("/api/files").then(r => r.json()).then(files => {
     const sel = $("fileSelect");
     sel.innerHTML = '<option value="">— 选择已有视频文件 —</option>';
+    const list = $("msList");
+    if(list) list.innerHTML = "";
     for(const f of files){
       const opt = document.createElement("option");
       opt.value = f.name;
       opt.textContent = f.name + " (" + f.size_mb + "MB, " + f.ext + ")";
       sel.appendChild(opt);
+      if(list){
+        const row = document.createElement("label");
+        row.className = "ms-item";
+        const cb = document.createElement("input");
+        cb.type = "checkbox"; cb.value = f.name;
+        cb.addEventListener("change", msChanged);
+        const sp = document.createElement("span");
+        sp.className = "nm";
+        sp.textContent = f.name + " (" + f.size_mb + "MB)";
+        row.appendChild(cb); row.appendChild(sp);
+        list.appendChild(row);
+      }
     }
+    msChanged();
   }).catch(() => {});
+}
+
+/* ---- 多选下拉框 + 批量删除 ---- */
+function toggleMs(ev){
+  if(ev) ev.stopPropagation();
+  const p = $("msPanel"); if(!p) return;
+  p.style.display = (p.style.display === "none") ? "" : "none";
+}
+document.addEventListener("click", (e) => {
+  const w = $("msWrap"), p = $("msPanel");
+  if(w && p && !w.contains(e.target)) p.style.display = "none";
+});
+
+function msItems(){ return Array.from(document.querySelectorAll("#msList input[type=checkbox]")); }
+function msChecked(){ return msItems().filter(i => i.checked).map(i => i.value); }
+
+function msChanged(){
+  const sel = $("fileSelect");
+  if(!sel) return;
+  const ck = msChecked();
+  // 离线转写一次一个: 主选择 = 第一个勾选的
+  sel.value = ck.length ? ck[0] : "";
+  const cnt = $("msCount"); if(cnt) cnt.textContent = "已选 " + ck.length + " 个";
+  const del = $("msDelBtn"); if(del) del.disabled = (ck.length === 0);
+  const all = $("msAll");
+  const n = msItems().length;
+  if(all) all.checked = (n > 0 && ck.length === n);
+  const lab = $("msLabel");
+  if(lab) lab.textContent = ck.length
+      ? (ck.length === 1 ? ck[0] : ("已选 " + ck.length + " 个文件"))
+      : "— 选择已有视频文件 —";
+  onFileSelect();
+}
+
+function msToggleAll(v){
+  msItems().forEach(i => { i.checked = v; });
+  msChanged();
+}
+
+function showBulkDeleteModal(){
+  const names = msChecked();
+  if(!names.length) return;
+  $("bulkDeleteCount").textContent = names.length;
+  $("bulkDeleteList").innerHTML = names.map(n => "• " + escHtml(n)).join("<br>");
+  $("bulkDeleteModal").style.display = "";
+}
+function hideBulkDeleteModal(){ $("bulkDeleteModal").style.display = "none"; }
+
+async function doBulkDelete(){
+  const names = msChecked();
+  if(!names.length) return;
+  const btn = $("bulkDeleteConfirm"); btn.disabled = true; btn.textContent = "删除中…";
+  try{
+    const r = await fetch("/api/delete-bulk", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({names: names, keep_index: false})
+    });
+    const d = await r.json();
+    hideBulkDeleteModal();
+    const okN = (d.deleted || []).length, badN = (d.failed || []).length;
+    setStatus("🗑 已删除 " + okN + " 个文件" + (badN ? ("（" + badN + " 个失败）") : ""), badN ? "err" : "ok");
+    const p = $("msPanel"); if(p) p.style.display = "none";
+    await loadFileList2();
+  }catch(e){
+    setStatus("批量删除失败: " + e.message, "err");
+  }finally{
+    btn.disabled = false; btn.textContent = "确定删除";
+  }
 }
 
 // ---- 页面刷新重连: 检查是否有未完成的任务 ----
@@ -1404,6 +1535,26 @@ document.addEventListener("DOMContentLoaded", () => {
     <div class="auth-msg" id="authMsg"></div>
     <div class="modal-actions" style="margin-top:16px">
       <button class="btn-cancel" onclick="hideAuthModal()">关闭</button>
+    </div>
+  </div>
+</div>
+<!-- 批量删除弹窗 -->
+<div id="bulkDeleteModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideBulkDeleteModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <h3>🗑️ 批量删除</h3>
+    <p style="color:var(--sub);font-size:13px;margin-bottom:10px;line-height:1.6">
+      确定删除以下 <b id="bulkDeleteCount" style="color:var(--danger)">0</b> 个文件？<br>
+      同名 mp3/mp4 会一起删除，transcripts 里的转写记录一并移除。
+    </p>
+    <div id="bulkDeleteList" style="max-height:220px;overflow:auto;font-size:12px;color:var(--txt);
+         background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;margin-bottom:14px;
+         overflow-wrap:anywhere;word-break:break-all"></div>
+    <p style="color:var(--danger);font-size:12px;background:rgba(248,113,113,.08);padding:8px 10px;border-radius:6px;border:1px solid rgba(248,113,113,.2);margin-bottom:14px">
+      ⚠️ 此操作不可逆。
+    </p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="hideBulkDeleteModal()">取消</button>
+      <button id="bulkDeleteConfirm" class="btn-confirm" style="background:var(--danger)" onclick="doBulkDelete()">确定删除</button>
     </div>
   </div>
 </div>

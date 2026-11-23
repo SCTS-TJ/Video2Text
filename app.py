@@ -210,6 +210,11 @@ class DeleteReq(BaseModel):
     keep_index: bool = False  # 是否保留索引记录
 
 
+class BulkDeleteReq(BaseModel):
+    names: list[str] = []
+    keep_index: bool = False
+
+
 class AuthStartReq(BaseModel):
     provider: str
 
@@ -670,16 +675,53 @@ def api_rename(req: RenameReq) -> list[dict]:
     return api_files()
 
 
-@app.post("/api/delete")
-def api_delete(req: DeleteReq) -> list[dict]:
-    """删除 downloads/ 下的文件, 可选是否同时从 index.json 移除。
-    同名 mp3+mp4 会一起删除 (配对文件)。
+def _remove_from_index(deleted: list) -> None:
+    """从 transcripts/index.json 移除这些文件(含配对键/别名反查)。"""
+    from ingestion.index import _load, _save
+    idx = _load()
+    files_dict = idx.get("files", {})
+    changed = False
+    for n in deleted:
+        if n in files_dict:
+            del files_dict[n]
+            changed = True
+            continue
+        # 删 mp4 时也删对应 mp3 键 (index 以 mp3 为键)
+        if n.endswith((".mp4", ".webm", ".mkv", ".mov")):
+            b, _ = os.path.splitext(n)
+            hit = False
+            for alt_ext in (".mp3", ".m4a", ".wav", ".opus", ".ogg"):
+                k2 = b + alt_ext
+                if k2 in files_dict:
+                    del files_dict[k2]
+                    changed = True
+                    hit = True
+                    logger.info("已从索引移除配对键 key=%s (对应 %s)", k2, n)
+                    break
+            if hit:
+                continue
+        # 别名/关联反查
+        for k in list(files_dict.keys()):
+            entry = files_dict[k]
+            rels = entry.get("related_files") or entry.get("aliases") or []
+            if n in rels:
+                del files_dict[k]
+                changed = True
+                break
+    if changed:
+        _save(idx)
+
+
+def _delete_one(name: str, keep_index: bool) -> list:
+    """删除单个文件 + 配对文件(mp3<->mp4) + 索引条目; 返回实际删除的文件名列表。
+
+    供单删 / 批量删 共用。
     """
-    name = req.name.strip()
+    name = (name or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name required")
     if "/" in name or ".." in name:
-        raise HTTPException(status_code=400, detail="invalid filename")
+        raise HTTPException(status_code=400, detail=f"invalid filename: {name}")
 
     path = os.path.join(DOWNLOAD_DIR, name)
     # CIFS 缓存容错: isfile 误判时用 os.stat 穿透缓存重试
@@ -695,7 +737,7 @@ def api_delete(req: DeleteReq) -> list[dict]:
         logger.info("文件删除 name=%s path=%s", name, path)
     except Exception as e:
         logger.warning("文件删除失败 name=%s error=%s", name, e)
-        raise HTTPException(status_code=500, detail=f"delete failed: {e}")
+        raise HTTPException(status_code=500, detail=f"delete failed: {name}: {e}")
 
     # 同时删除配对文件 (mp4 <-> mp3)
     base, ext = os.path.splitext(name)
@@ -711,44 +753,35 @@ def api_delete(req: DeleteReq) -> list[dict]:
             try:
                 os.remove(pair_path)
                 deleted.append(pair_name)
+                _recently_deleted[pair_name] = time.time()
             except Exception:
                 pass  # 配对删除失败不影响主操作
 
-    # 从 index.json 移除 (默认保留, 让用户可选)
-    if not req.keep_index:
-        from ingestion.index import _load, _save
-        idx = _load()
-        files_dict = idx.get("files", {})
-        changed = False
-        for n in deleted:
-            # 主键 + 该键可能被别名引用 (related_files/aliases)
-            if n in files_dict:
-                del files_dict[n]
-                changed = True
-            else:
-                # 删 mp4 时也删对应 mp3 键 (index 以 mp3 为键)
-                if n.endswith((".mp4", ".webm", ".mkv", ".mov")):
-                    base, _ = os.path.splitext(n)
-                    for alt_ext in (".mp3", ".m4a", ".wav", ".opus", ".ogg"):
-                        mp3_key = base + alt_ext
-                        if mp3_key in files_dict:
-                            del files_dict[mp3_key]
-                            changed = True
-                            logger.info("已从索引移除配对键 key=%s (对应 %s)", mp3_key, n)
-                            break
-                if not changed:
-                    # 例如删 mp4 但索引中是 mp3 为主键
-                    for k in list(files_dict.keys()):
-                        entry = files_dict[k]
-                        rels = entry.get("related_files") or entry.get("aliases") or []
-                        if n in rels:
-                            del files_dict[k]
-                            changed = True
-                            break
-        if changed:
-            _save(idx)
+    if not keep_index:
+        _remove_from_index(deleted)
+    return deleted
 
+
+@app.post("/api/delete")
+def api_delete(req: DeleteReq) -> list[dict]:
+    """删除 downloads/ 下的单个文件(含配对 mp3/mp4 与索引条目)。"""
+    _delete_one(req.name, req.keep_index)
     return api_files()
+
+
+@app.post("/api/delete-bulk")
+def api_delete_bulk(req: BulkDeleteReq) -> dict:
+    """批量删除。逐个执行单文件删除逻辑, 单个失败不影响其它。"""
+    ok, failed = [], []
+    for n in (req.names or []):
+        try:
+            ok.extend(_delete_one(n, req.keep_index))
+        except HTTPException as e:
+            failed.append({"name": n, "error": str(e.detail)})
+        except Exception as e:  # noqa: BLE001
+            failed.append({"name": n, "error": f"{type(e).__name__}: {e}"})
+    logger.info("批量删除 成功=%d 失败=%d", len(ok), len(failed))
+    return {"deleted": ok, "failed": failed, "files": api_files()}
 
 
 def _cleanup_deleted_cache():
