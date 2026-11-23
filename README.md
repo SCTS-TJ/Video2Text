@@ -2,7 +2,7 @@
 
 输入社媒视频链接，自动下载音频 → Whisper ASR 转写 → 带 word-level 时间戳的分段文案。
 
-**v1.7.4** — 文件下拉框加**搜索过滤**（边打边筛；全选只作用于可见项）（历史 v1.7.3: 批量删除提速 54×）
+**v1.7.5** — 报错/提示消息**折行显示**，不再撑宽布局（历史 v1.7.4: 文件列表搜索过滤）
 
 ## 架构
 
@@ -110,6 +110,14 @@ Video2Text/
 └── templates/
     └── index.html        # 前端 (内联 CSS/JS, 字幕同步高亮)
 ```
+
+## v1.7.5 更新内容 (报错消息折行)
+
+- 📐 **报错/提示消息改为折行显示**，不再把 UI 撑宽
+  - **根因**：① `.col`（flex 子项）缺 `min-width:0` → 长文本把整列顶宽、进而撑开整行；② `.status .msg` 是 `white-space:nowrap` → 不折行（flex 子项默认 `min-width:auto`，会按内容撑开）
+  - **修复**：`.col` 加 `min-width:0`；`.status` 加 `flex-wrap:wrap`+`min-width:0`；`.msg` 改 `flex:1 1 100%` + `white-space:pre-wrap`（**保留换行**且自动折行）+ `overflow-wrap:anywhere` + `word-break:break-word`，并加 `max-height:33vh` 防超长撑高
+  - 错误消息用危险色显示，便于识别
+- ✅ 实测（真机 Chromium 1280×800）：注入超长报错 → 消息框 570×102（折成 5-6 行），`scrollW == clientW` 无横向溢出，**页面 scrollWidth 1280 → 1280 未变化**
 
 ## v1.7.4 更新内容 (文件列表搜索过滤)
 
