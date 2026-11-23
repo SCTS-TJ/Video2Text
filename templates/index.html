@@ -183,7 +183,7 @@
 
   .row{display:flex;gap:16px;flex:1;min-height:0}
   .col{
-    flex:1;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    flex:1;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
     display:flex;flex-direction:column;min-height:0;max-height:100%;
   }
   .col .head{
@@ -314,6 +314,7 @@
   .status{
     padding:8px 14px;font-size:12px;border-top:1px solid var(--line);flex-shrink:0;
     display:flex;align-items:center;gap:2px;overflow:hidden;
+    flex-wrap:wrap;min-width:0;
   }
   .status .step{color:var(--line);white-space:nowrap;font-size:11px;transition:.2s;flex-shrink:0}
   .status .step.done{color:var(--accent2)}
@@ -321,7 +322,14 @@
   .status .step:not(:last-child):after{content:"92";margin:0 2px;color:var(--line);font-size:10px}
   .status.ok .step.done:last-child{color:var(--accent2)}
   .status.err .step.active{color:var(--danger)}
-  .status .msg{color:var(--sub);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:4px}
+  /* 报错/提示消息: 长文本折行显示, 不撑宽布局 */
+  .status .msg{
+    color:var(--sub);font-size:11px;margin-left:4px;
+    flex:1 1 100%;min-width:0;
+    white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;
+    line-height:1.55;max-height:33vh;overflow:auto;
+  }
+  .status.err .msg{color:var(--danger)}
   .pill{
     display:inline-block;background:var(--panel2);border:1px solid var(--line);
     border-radius:99px;padding:2px 8px;font-size:11px;color:var(--sub);
