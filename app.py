@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from ingestion import ingest
 from ingestion.index import add_entry, get_entry
+from ingestion.auth_qr import list_providers as auth_providers, start as auth_start, status as auth_status
 from ingestion.logger import get_logger
 
 logger = get_logger(__name__)
@@ -207,6 +208,10 @@ class RenameReq(BaseModel):
 class DeleteReq(BaseModel):
     name: str
     keep_index: bool = False  # 是否保留索引记录
+
+
+class AuthStartReq(BaseModel):
+    provider: str
 
 
 def _youtube_embed(url: str) -> "str | None":
@@ -864,6 +869,28 @@ def api_health() -> dict:
     overall = all(s.get("ok") for s in services if not s.get("optional"))
     return {"overall": overall, "services": services}
 
+
+
+@app.get("/api/auth/providers")
+def api_auth_providers() -> list[dict]:
+    """可授权登录的平台列表。"""
+    return auth_providers()
+
+
+@app.post("/api/auth/start")
+def api_auth_start(req: AuthStartReq) -> dict:
+    """启动一次扫码登录会话(服务端无头浏览器取二维码)。"""
+    logger.info("授权登录启动 provider=%s", req.provider)
+    r = auth_start(req.provider)
+    if r.get("error"):
+        raise HTTPException(status_code=400, detail=r["error"])
+    return r
+
+
+@app.get("/api/auth/status/{sid}")
+def api_auth_status(sid: str) -> dict:
+    """轮询扫码登录状态。"""
+    return auth_status(sid)
 
 
 @app.get("/api/task/{task_id}")

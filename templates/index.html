@@ -114,6 +114,19 @@
   .modal-actions .btn-confirm{background:var(--accent);color:#fff}
   .modal-actions .btn-confirm:hover{opacity:.85}
   .modal-actions .btn-confirm:disabled{opacity:.4;cursor:not-allowed}
+  /* ---- 授权登录 ---- */
+  .auth-btn{
+    margin-left:10px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:99px;padding:4px 12px;font-size:12px;cursor:pointer;transition:.15s;white-space:nowrap;
+  }
+  .auth-btn:hover{border-color:var(--accent);color:var(--accent)}
+  .auth-prov{
+    display:block;width:100%;margin:0 0 8px;padding:10px;border-radius:8px;
+    background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer;font-size:14px;
+  }
+  .auth-prov:hover{border-color:var(--accent);color:var(--accent)}
+  #authQr{width:200px;height:200px;display:block;margin:14px auto 8px;background:#fff;border-radius:8px;padding:6px}
+  .auth-msg{text-align:center;font-size:13px;color:var(--sub);line-height:1.7;margin-top:6px}
   .offline-bar select{
     flex:0 1 180px;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
     border-radius:8px;padding:6px 10px;font-size:12px;outline:none;cursor:pointer;
@@ -298,6 +311,7 @@
         <div class="tipbox" id="svcTipbox"></div>
       </div>
     </div>
+    <button id="authBtn" class="auth-btn" onclick="showAuthModal()" title="扫码授权登录（小红书等）">🔑 授权登录</button>
   </header>
 
   <div class="bar">
@@ -539,7 +553,7 @@ async function startIngest(){
 
         if(s === "downloading") { setStatus("download", "run"); updateProgress(d.progress || 5, d.speed); }
         else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d.progress || 40, d.speed); }
-        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
+        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; maybePromptAuth(d.error); }
         else if(s === "done"){
           updateProgress(100); setTimeout(function(){hideProgress()},800);
           setStatus("done", "ok");
@@ -1127,6 +1141,74 @@ function showDeleteModal(){
   $("deleteModal").style.display = "";
 }
 function hideDeleteModal(){ $("deleteModal").style.display = "none"; }
+
+/* ---- 授权登录 (二维码在网页里扫, 服务器无头浏览器完成登录并存 cookie) ---- */
+let _authSid = null, _authTimer = null;
+
+async function showAuthModal(preselect){
+  const m = $("authModal"); if(!m) return;
+  m.style.display = "";
+  $("authQrWrap").style.display = "none";
+  $("authProviders").style.display = "";
+  $("authMsg").textContent = "选择一个平台扫码登录";
+  try{
+    const ps = await (await fetch("/api/auth/providers", {cache:"no-store"})).json();
+    $("authProviders").innerHTML = ps.map(p =>
+      '<button class="auth-prov" onclick="startAuth(\'' + p.key + '\')">' + p.label + ' · 扫码登录</button>').join("");
+    if(preselect && ps.some(p => p.key === preselect)) startAuth(preselect);
+  }catch(e){ $("authMsg").textContent = "加载失败: " + e.message; }
+}
+
+function hideAuthModal(){
+  $("authModal").style.display = "none";
+  if(_authTimer){ clearInterval(_authTimer); _authTimer = null; }
+  _authSid = null;
+}
+
+async function startAuth(key){
+  $("authMsg").textContent = "正在启动浏览器并获取二维码…";
+  try{
+    const r = await fetch("/api/auth/start", {method:"POST", headers:{"Content-Type":"application/json"},
+                                             body: JSON.stringify({provider: key})});
+    const d = await r.json();
+    if(!r.ok){ $("authMsg").textContent = "启动失败: " + (d.detail || r.status); return; }
+    _authSid = d.sid;
+    $("authProviders").style.display = "none";
+    $("authQrWrap").style.display = "";
+    $("authLabel").textContent = d.label;
+    if(_authTimer) clearInterval(_authTimer);
+    _authTimer = setInterval(pollAuth, 2000);
+  }catch(e){ $("authMsg").textContent = "请求出错: " + e.message; }
+}
+
+async function pollAuth(){
+  if(!_authSid) return;
+  try{
+    const d = await (await fetch("/api/auth/status/" + _authSid, {cache:"no-store"})).json();
+    if(d.qr) $("authQr").src = d.qr;
+    $("authMsg").textContent = d.detail || d.state;
+    if(d.state === "ok"){
+      clearInterval(_authTimer); _authTimer = null;
+      $("authQrWrap").style.display = "none";
+      $("authProviders").style.display = "";
+      setTimeout(hideAuthModal, 2000);
+    }else if(d.state === "error" || d.state === "timeout" || d.state === "gone"){
+      clearInterval(_authTimer); _authTimer = null;
+      $("authQrWrap").style.display = "none";
+      $("authProviders").style.display = "";
+      $("authMsg").textContent = (d.detail || d.state) + " —— 可重新选择平台";
+    }
+  }catch(e){}
+}
+
+/* 下载失败若是"未授权"类错误, 自动弹出对应平台的扫码登录 */
+function maybePromptAuth(err){
+  const e = String(err || "");
+  let key = "";
+  if(/No video formats found|小红书|xiaohongshu/i.test(e)) key = "xiaohongshu";
+  else if(/元宝登录凭据|wx-downloader login/i.test(e)) key = "weixin";
+  if(key && $("authModal")) showAuthModal(key);
+}
 async function doDelete(){
   const file = _deleteFile;
   if(!file) return;
@@ -1232,7 +1314,7 @@ function reconnectTask(){
         var res = d2.result;
         if(s === "downloading") { setStatus("download", "run"); updateProgress(d2.progress || 5, d2.speed); }
         else if(s === "transcribing") { setStatus("transcribe", "run"); updateProgress(d2.progress || 40, d2.speed); }
-        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d2.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; }
+        else if(s === "error"){ localStorage.removeItem("v2t_active_task"); hideProgress(); setStatus("\u274c " + (d2.error||"任务失败"), "err"); clearInterval(pollTimer); $("goBtn").disabled = false; $("stopBtn").style.display = "none"; maybePromptAuth(d2.error); }
         else if(s === "done"){
           localStorage.removeItem("v2t_active_task");
           updateProgress(100); setTimeout(function(){hideProgress()},800);
@@ -1307,6 +1389,21 @@ document.addEventListener("DOMContentLoaded", () => {
     <div class="modal-actions">
       <button class="btn-cancel" onclick="hideDeleteModal()">取消</button>
       <button id="deleteConfirm" class="btn-confirm" style="background:var(--danger)" onclick="doDelete()">确定删除</button>
+    </div>
+  </div>
+</div>
+<!-- 授权登录弹窗 -->
+<div id="authModal" class="modal-overlay" style="display:none" onclick="if(event.target===this)hideAuthModal()">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <h3>🔑 授权登录</h3>
+    <div id="authProviders"></div>
+    <div id="authQrWrap" style="display:none">
+      <img id="authQr" alt="登录二维码" />
+      <div class="auth-msg" id="authLabel"></div>
+    </div>
+    <div class="auth-msg" id="authMsg"></div>
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn-cancel" onclick="hideAuthModal()">关闭</button>
     </div>
   </div>
 </div>
