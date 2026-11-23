@@ -675,11 +675,12 @@ def api_rename(req: RenameReq) -> list[dict]:
     return api_files()
 
 
-def _remove_from_index(deleted: list) -> None:
-    """从 transcripts/index.json 移除这些文件(含配对键/别名反查)。"""
-    from ingestion.index import _load, _save
-    idx = _load()
-    files_dict = idx.get("files", {})
+def _strip_keys(files_dict: dict, deleted: list) -> bool:
+    """在内存里移除这些文件对应的索引键(含配对键/别名反查)。返回是否有改动。
+
+    只操作传入的 dict、不读写文件 —— 供批量删除"index.json 只读写一次"使用
+    (该文件可达 13MB/55 万行, 每次解析约 1.8s, 逐文件读写会拖垮批量操作)。
+    """
     changed = False
     for n in deleted:
         if n in files_dict:
@@ -708,7 +709,14 @@ def _remove_from_index(deleted: list) -> None:
                 del files_dict[k]
                 changed = True
                 break
-    if changed:
+    return changed
+
+
+def _remove_from_index(deleted: list) -> None:
+    """从 transcripts/index.json 移除这些文件(单文件删除用)。"""
+    from ingestion.index import _load, _save
+    idx = _load()
+    if _strip_keys(idx.get("files", {}), deleted):
         _save(idx)
 
 
@@ -771,16 +779,65 @@ def api_delete(req: DeleteReq) -> list[dict]:
 
 @app.post("/api/delete-bulk")
 def api_delete_bulk(req: BulkDeleteReq) -> dict:
-    """批量删除。逐个执行单文件删除逻辑, 单个失败不影响其它。"""
-    ok, failed = [], []
+    """批量删除（性能优化版）。
+
+    关键: 大目录/大索引下, 若逐文件做 stat 重试 + 读写 index.json 会极慢
+    —— 实测单文件约 4.3s(index.json 解析 1.8s + 写回 0.6s + 缺失配对重试 2.0s),
+    全选 57 个要 4 分钟。这里改为:
+      · downloads 只 listdir 一次(0.01s), 用它做存在性判断
+      · index.json 只读一次、只写一次(而非每文件一次)
+      · 单文件失败不影响其它
+    """
+    import time as _time
+
+    t0 = _time.time()
+    try:
+        present = set(os.listdir(DOWNLOAD_DIR))
+    except OSError:
+        present = set()
+
+    names = []
     for n in (req.names or []):
+        n = (n or "").strip()
+        if n and "/" not in n and ".." not in n:
+            names.append(n)
+
+    ok, failed = [], []
+    for n in names:
+        if n not in present:
+            failed.append({"name": n, "error": f"file not found: {n}"})
+            continue
+        base, ext = os.path.splitext(n)
+        if ext.lower() == ".mp4":
+            pair = base + ".mp3"
+        elif ext.lower() == ".mp3":
+            pair = base + ".mp4"
+        else:
+            pair = ""
         try:
-            ok.extend(_delete_one(n, req.keep_index))
-        except HTTPException as e:
-            failed.append({"name": n, "error": str(e.detail)})
+            os.remove(os.path.join(DOWNLOAD_DIR, n))
+            ok.append(n)
+            _recently_deleted[n] = _time.time()
+            logger.info("文件删除 name=%s", n)
         except Exception as e:  # noqa: BLE001
+            logger.warning("文件删除失败 name=%s error=%s", n, e)
             failed.append({"name": n, "error": f"{type(e).__name__}: {e}"})
-    logger.info("批量删除 成功=%d 失败=%d", len(ok), len(failed))
+            continue
+        if pair and pair in present:
+            try:
+                os.remove(os.path.join(DOWNLOAD_DIR, pair))
+                ok.append(pair)
+                _recently_deleted[pair] = _time.time()
+            except Exception:
+                pass  # 配对删除失败不影响主操作
+
+    if ok and not req.keep_index:
+        from ingestion.index import _load, _save
+        idx = _load()
+        if _strip_keys(idx.get("files", {}), ok):
+            _save(idx)
+
+    logger.info("批量删除 成功=%d 失败=%d 用时=%.2fs", len(ok), len(failed), _time.time() - t0)
     return {"deleted": ok, "failed": failed, "files": api_files()}
 
 
