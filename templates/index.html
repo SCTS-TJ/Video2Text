@@ -156,6 +156,17 @@
   .ms-head label{display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--txt)}
   .ms-head input{accent-color:var(--danger);cursor:pointer}
   .ms-list{overflow:auto;max-height:220px;display:flex;flex-direction:column;gap:2px}
+  .ms-search{display:flex;align-items:center;gap:6px;padding:0 2px}
+  .ms-search input{
+    flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--txt);
+    border-radius:6px;padding:5px 8px;font-size:12px;outline:none;
+  }
+  .ms-search input:focus{border-color:var(--accent)}
+  .ms-search .ms-clear{
+    cursor:pointer;color:var(--sub);font-size:12px;padding:0 2px;flex-shrink:0;
+  }
+  .ms-search .ms-clear:hover{color:var(--accent)}
+  .ms-search .ms-match{font-size:11px;color:var(--sub);white-space:nowrap;flex-shrink:0}
   .ms-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;font-size:12px;color:var(--txt);cursor:pointer}
   .ms-item:hover{background:var(--panel2)}
   .ms-item input{accent-color:var(--danger);cursor:pointer;flex-shrink:0}
@@ -368,6 +379,11 @@
         <div class="ms-head">
           <label><input type="checkbox" id="msAll" onchange="msToggleAll(this.checked)" /> 全选</label>
           <span id="msCount">已选 0 个</span>
+        </div>
+        <div class="ms-search">
+          <input id="msSearch" type="text" placeholder="🔍 输入关键词筛选文件名…" oninput="msFilter(this.value)" />
+          <span class="ms-clear" onclick="msClearSearch()" title="清空">✕</span>
+          <span class="ms-match" id="msMatch"></span>
         </div>
         <div class="ms-list" id="msList"></div>
         <div class="ms-foot">
@@ -1345,6 +1361,8 @@ function loadFileList2(){
         list.appendChild(row);
       }
     }
+    const s = $("msSearch"); if(s) s.value = "";
+    const m = $("msMatch"); if(m) m.textContent = "";
     msChanged();
   }).catch(() => {});
 }
@@ -1353,7 +1371,9 @@ function loadFileList2(){
 function toggleMs(ev){
   if(ev) ev.stopPropagation();
   const p = $("msPanel"); if(!p) return;
-  p.style.display = (p.style.display === "none") ? "" : "none";
+  const open = (p.style.display === "none");
+  p.style.display = open ? "" : "none";
+  if(open){ const s = $("msSearch"); if(s) setTimeout(() => s.focus(), 30); }
 }
 document.addEventListener("click", (e) => {
   const w = $("msWrap"), p = $("msPanel");
@@ -1362,6 +1382,35 @@ document.addEventListener("click", (e) => {
 
 function msItems(){ return Array.from(document.querySelectorAll("#msList input[type=checkbox]")); }
 function msChecked(){ return msItems().filter(i => i.checked).map(i => i.value); }
+/* 当前"可见"(未被搜索过滤掉)的条目 —— 全选只作用于可见项 */
+function msVisible(){
+  return msItems().filter(i => {
+    const row = i.closest(".ms-item");
+    return row && row.style.display !== "none";
+  });
+}
+
+/* 搜索过滤: 边打边筛(纯前端, 即时) */
+function msFilter(q){
+  q = (q || "").trim().toLowerCase();
+  let shown = 0;
+  const all = msItems();
+  all.forEach(i => {
+    const row = i.closest(".ms-item");
+    if(!row) return;
+    const hit = !q || i.value.toLowerCase().includes(q);
+    row.style.display = hit ? "" : "none";
+    if(hit) shown++;
+  });
+  const m = $("msMatch");
+  if(m) m.textContent = q ? ("命中 " + shown + "/" + all.length) : "";
+  msChanged();
+}
+
+function msClearSearch(){
+  const s = $("msSearch");
+  if(s){ s.value = ""; msFilter(""); s.focus(); }
+}
 
 function msChanged(){
   const sel = $("fileSelect");
@@ -1369,11 +1418,13 @@ function msChanged(){
   const ck = msChecked();
   // 离线转写一次一个: 主选择 = 第一个勾选的
   sel.value = ck.length ? ck[0] : "";
-  const cnt = $("msCount"); if(cnt) cnt.textContent = "已选 " + ck.length + " 个";
+  const tot = msItems().length, vis = msVisible().length;
+  const cnt = $("msCount");
+  if(cnt) cnt.textContent = "已选 " + ck.length + " 个" + (vis < tot ? ("（可见 " + vis + "/" + tot + "）") : "");
   const del = $("msDelBtn"); if(del) del.disabled = (ck.length === 0);
-  const all = $("msAll");
-  const n = msItems().length;
-  if(all) all.checked = (n > 0 && ck.length === n);
+  const allBox = $("msAll");
+  const visItems = msVisible();
+  if(allBox) allBox.checked = (visItems.length > 0 && visItems.every(i => i.checked));
   const lab = $("msLabel");
   if(lab) lab.textContent = ck.length
       ? (ck.length === 1 ? ck[0] : ("已选 " + ck.length + " 个文件"))
@@ -1381,8 +1432,9 @@ function msChanged(){
   onFileSelect();
 }
 
+/* 全选/取消: 只作用于当前可见(过滤后)的条目 */
 function msToggleAll(v){
-  msItems().forEach(i => { i.checked = v; });
+  msVisible().forEach(i => { i.checked = v; });
   msChanged();
 }
 
