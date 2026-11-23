@@ -45,9 +45,15 @@ def main() -> int:
         deadline = time.time() + 300
         ok = False
         while time.time() < deadline:
-            names = {c["name"] for c in ctx.cookies()
-                     if "xiaohongshu" in (c.get("domain") or "") or "rednote" in (c.get("domain") or "")}
-            if "web_session" in names:
+            # 注意: 小红书对"访客"也会下发 web_session, 不能用它判断登录!
+            # 正确判据: 访问须登录才可见的页面, 若不再 302 到 /login 才算登录成功。
+            try:
+                r = ctx.request.get("https://www.xiaohongshu.com/explore",
+                                    max_redirects=0, timeout=15000)
+                logged = (r.status == 200) or ("/login" not in (r.headers.get("location", "") or ""))
+            except Exception:
+                logged = False
+            if logged:
                 ok = True
                 break
             time.sleep(2)
